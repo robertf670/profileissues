@@ -9,13 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- _(Add new bullets here before each release.)_
-
 ### Changed
 
 ### Fixed
 
 ### Removed
+
+---
+
+## [1.1.0] — 2026-04-01
+
+### Added
+
+- **README** with setup, `streamlit run`, env vars, project layout, GTFS refresh behaviour, and brief deployment notes
+- **`.env.example`** for `NTA_API_KEY` and `GTFS_DOWNLOAD_URL`
+- **Segment flags** (`Flag(s)` column in the table, CSV, and Excel): **tight schedule** (implied speed ≥ 55 km/h), **no schedule time**, **tiny shape distance** on the shape polyline
+- **Trip-relative “slow”** flag: **slower than typical for this trip** — compares each segment to the **median** implied speed on the **same** trip; skips comparison when the trip median is below a floor (uniformly slow / congested patterns)
+- UI: summary when any segment is flagged; expander describing flag rules; thresholds live in `auditor/segment_flags.py`
+
+### Changed
+
+- **Dropped** a fixed absolute “slow km/h” rule (it flagged natural slow running in dense areas); replaced with the median-based trip-relative check above
 
 ---
 
@@ -41,5 +55,6 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/robertf670/profileissues/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/robertf670/profileissues/releases/tag/v1.0.0

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 from pyproj import Transformer
@@ -82,6 +82,7 @@ class SegmentRow:
     distance_m: float
     time_s: int
     speed_kmh: float | None
+    flags: list[str] = field(default_factory=list)
 
 
 def build_segment_table(

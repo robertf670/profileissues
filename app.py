@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from streamlit_folium import st_folium
 
 from auditor.download import DEFAULT_URL, data_dir, download_gtfs
+from auditor.segment_flags import annotate_segment_flags, flag_summary
 from auditor.segments import build_segment_table
 from auditor.excel_export import TripMeta, build_audit_excel_bytes
 from auditor.route_map import build_route_map
@@ -61,6 +62,8 @@ def _audit_table_for_display(df: pd.DataFrame) -> pd.DataFrame:
     out["Implied speed (km/h)"] = out["Implied speed (km/h)"].map(
         lambda x: f"{float(x):.2f}" if pd.notna(x) else ""
     )
+    if "Flag(s)" in out.columns:
+        out["Flag(s)"] = out["Flag(s)"].astype(str)
     return out
 
 
@@ -232,6 +235,8 @@ if err:
     st.error(err)
     st.stop()
 
+annotate_segment_flags(rows)
+
 st.session_state["_audit_keep"] = True
 if st.session_state.get("_audit_restore"):
     st.session_state.pop("_audit_restore", None)
@@ -269,6 +274,29 @@ st.markdown(
     f"Terminus departure **{trip_meta['terminus_departure']}**"
 )
 
+n_flagged, flag_buckets = flag_summary(rows)
+if n_flagged:
+    parts = [f"{k}: {v}" for k, v in sorted(flag_buckets.items(), key=lambda x: (-x[1], x[0]))]
+    st.warning("**" + str(n_flagged) + "** segment(s) flagged — " + " · ".join(parts))
+else:
+    st.caption("No heuristic flags on this trip (defaults in `auditor/segment_flags.py`).")
+
+with st.expander("What flags mean (heuristics)"):
+    st.markdown(
+        """
+        Flags are **hints**, not proof of an error. They compare timetable time to **distance along the GTFS shape**.
+
+        | Flag | Meaning |
+        |------|---------|
+        | **No schedule time** | Arrival at B is not after departure at A in the feed (or zero seconds). Speed is not computed. |
+        | **Tiny shape distance** | The two stops project to the same place on the polyline (under about **1 m**). Check duplicate stops or shape alignment. |
+        | **Tight schedule** | Implied **average** speed is **≥ 55 km/h** — timetable is tight vs the mapped distance. |
+        | **Slower than typical for this trip** | Only when the trip has enough segments: this leg’s implied speed is **well below** the **median** implied speed on *this same trip* (and the trip median is not already “all slow”). Ignores absolute limits — a **24 km/h** leg on a fully congested trip is not flagged. |
+
+        Trip-relative settings (`median ratio`, `floor`, min segment count) are in `auditor/segment_flags.py`.
+        """
+    )
+
 df = pd.DataFrame(
     {
         "From stop": [r.from_stop_name for r in rows],
@@ -279,12 +307,14 @@ df = pd.DataFrame(
         "Scheduled time (s)": [r.time_s for r in rows],
         "Scheduled time (M:SS)": [format_duration_m_ss(r.time_s) for r in rows],
         "Implied speed (km/h)": [round(r.speed_kmh, 2) if r.speed_kmh is not None else None for r in rows],
+        "Flag(s)": ["; ".join(r.flags) if r.flags else "—" for r in rows],
     }
 )
 
 st.caption(
     "Each row is one segment to the next stop. Distance is along the mapped route; "
-    "speed is that distance divided by the timetable time for the segment."
+    "speed is that distance divided by the timetable time for the segment. "
+    "**Flag(s)** highlights segments that may deserve a second look."
 )
 
 st.markdown(_AUDIT_TABLE_CSS, unsafe_allow_html=True)
