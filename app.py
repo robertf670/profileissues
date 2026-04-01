@@ -75,12 +75,20 @@ def _audit_table_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _env(key: str, default: str | None = None) -> str | None:
+    """Local `.env` / process env, then Streamlit Community Cloud **Secrets** (`st.secrets`)."""
     import os
 
     v = os.getenv(key)
-    if v is None or str(v).strip() == "":
-        return default
-    return v
+    if v is not None and str(v).strip() != "":
+        return v.strip()
+    try:
+        if key in st.secrets:
+            sv = st.secrets[key]
+            if sv is not None and str(sv).strip() != "":
+                return str(sv).strip()
+    except Exception:
+        pass
+    return default
 
 
 def _format_feed_calendar_cell(raw: object) -> str:
@@ -250,29 +258,15 @@ with st.form("audit"):
         )
         direction_id = direction[1]
 
-    c4, c5 = st.columns(2)
-    with c4:
-        headsign = st.text_input(
-            "Headsign (optional)",
-            placeholder="e.g. UCD, Belfield, Ongar — or leave blank",
-            help=(
-                "GTFS field `trip_headsign`: destination text shown on the bus. "
-                "It may say “Belfield”, “UCD”, “UCD Belfield”, etc., not necessarily “UCD” alone. "
-                "Leave blank to ignore headsign; if several trips share your time, add a word "
-                "that appears in the right sign."
-            ),
-            key="audit_headsign",
-        )
-    with c5:
-        departure_time = st.text_input(
-            "First departure from terminus",
-            placeholder="e.g. 17:32 or 17:32:00",
-            help=(
-                "Type the scheduled time at the first stop of the trip (stop_sequence minimum). "
-                "Use HH:MM or HH:MM:SS. GTFS can use times after midnight (e.g. 25:30:00)."
-            ),
-            key="audit_departure_time",
-        )
+    departure_time = st.text_input(
+        "First departure from terminus",
+        placeholder="e.g. 17:32 or 17:32:00",
+        help=(
+            "Type the scheduled time at the first stop of the trip (stop_sequence minimum). "
+            "Use HH:MM or HH:MM:SS. GTFS can use times after midnight (e.g. 25:30:00)."
+        ),
+        key="audit_departure_time",
+    )
 
     submitted = st.form_submit_button("Run audit")
 
@@ -304,7 +298,7 @@ with st.spinner("Matching trip and building segments…"):
         service_date=service_date,
         route_short_name=route,
         direction_id=direction_id,
-        headsign_contains=headsign,
+        headsign_contains="",
         terminus_departure_hhmm=hhmm,
     )
 
@@ -332,7 +326,7 @@ annotate_segment_flags(rows)
 st.session_state["_audit_keep"] = True
 if st.session_state.get("_audit_restore"):
     st.session_state.pop("_audit_restore", None)
-sync_audit_to_url(route, service_date, direction_id, headsign, dep_normalized)
+sync_audit_to_url(route, service_date, direction_id, dep_normalized)
 
 st.success(f"Trip **{trip_id}**")
 

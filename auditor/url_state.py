@@ -21,8 +21,6 @@ def init_audit_widget_defaults() -> None:
         st.session_state.audit_service_date = date.today()
     if "audit_route" not in st.session_state:
         st.session_state.audit_route = ""
-    if "audit_headsign" not in st.session_state:
-        st.session_state.audit_headsign = ""
     if "audit_departure_time" not in st.session_state:
         st.session_state.audit_departure_time = ""
     if "audit_direction" not in st.session_state:
@@ -50,8 +48,6 @@ def hydrate_from_url_once() -> None:
         return
     st.session_state["audit_route"] = str(route)
     st.session_state["audit_departure_time"] = str(dep)
-    hs = _qp_first(qp.get("hs"))
-    st.session_state["audit_headsign"] = str(hs or "")
     st.session_state["audit_direction"] = (
         ("Outbound (GTFS 0)", 0) if str(qp.get("dir", "0")) == "0" else ("Inbound (GTFS 1)", 1)
     )
@@ -62,7 +58,6 @@ def sync_audit_to_url(
     route: str,
     service_date: date,
     direction_id: int,
-    headsign: str,
     dep_normalized: str,
 ) -> None:
     """Write current audit to query string so refresh restores fields and can auto-run."""
@@ -70,4 +65,7 @@ def sync_audit_to_url(
     st.query_params["date"] = service_date.isoformat()
     st.query_params["dir"] = str(int(direction_id))
     st.query_params["dep"] = dep_normalized
-    st.query_params["hs"] = headsign.strip()
+    try:
+        del st.query_params["hs"]
+    except Exception:
+        pass

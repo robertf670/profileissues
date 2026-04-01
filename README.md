@@ -13,7 +13,7 @@ A small **Streamlit** app for Dublin Bus drivers and anyone auditing **published
 ## Features
 
 - Download **GTFS Dublin Bus** into `data/current/` (refreshed from the TFI/NTA feed when you use **Download / refresh GTFS**)
-- Match a trip by **route**, **inbound/outbound**, **first departure from terminus** (typed time), optional **headsign**, and **service date**
+- Match a trip by **route**, **inbound/outbound**, **first departure from terminus** (typed time), and **service date**
 - Full **segment table** with timetable times, **M:SS** segment duration, map, CSV & Excel export
 - Trip summary and URL state so you can bookmark or refresh with the same query (see app behaviour)
 
@@ -79,7 +79,32 @@ The app **does not** download a new feed on a timer. Use **Download / refresh GT
 
 ---
 
-## Deployment (brief)
+## Streamlit Community Cloud (recommended)
+
+Good fit for this app: **HTTPS**, GitHub deploy, no server to manage.
+
+1. Push this repo to GitHub (e.g. `profileissues`).
+2. Sign in at **[share.streamlit.io](https://share.streamlit.io)** with GitHub.
+3. **Create app** → pick the repo, branch **`main`**, main file **`app.py`**.
+4. **App settings → Secrets** (TOML). Optional keys — omit or leave empty to use the default public GTFS URL:
+
+   ```toml
+   # Optional — only if you use a custom API-hosted feed or URL override
+   # NTA_API_KEY = "your-key-here"
+   # GTFS_DOWNLOAD_URL = "https://..."
+   ```
+
+   The app reads these via `st.secrets` (and still supports local `.env`).
+
+5. **Advanced settings** (if offered): choose a **Python** version that matches local dev (e.g. 3.11 or 3.12).
+
+6. Deploy. First visit: open the sidebar and use **Download / refresh GTFS** (the `data/current/` folder is empty on a fresh instance until you do).
+
+**Note:** Free apps may **sleep** when idle; the next load can take a few seconds. GTFS is stored on the instance filesystem and may be **lost after restarts** — download again when needed, or accept a cold start after idle.
+
+---
+
+## Other hosts (Docker / PaaS)
 
 Streamlit is a long-running process; **Vercel** is not a good fit. Use a container host or PaaS (e.g. **Render**, **Fly.io**, **Railway**) with:
 

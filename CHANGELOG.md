@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Headsign** removed from the audit form (matching always ignores headsign); URL sync no longer stores `hs`
+- **`_env()`** also reads **Streamlit Community Cloud** secrets (`st.secrets`) so `NTA_API_KEY` / `GTFS_DOWNLOAD_URL` work without a `.env` file on Cloud
+- **README**: deployment section for **Streamlit Community Cloud** (share.streamlit.io, secrets TOML, first-run GTFS note)
+
 ### Fixed
 
 ### Removed
