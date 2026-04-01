@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import csv
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from io import StringIO
 from pathlib import Path
 
@@ -12,7 +13,13 @@ import streamlit as st
 from dotenv import load_dotenv
 from streamlit_folium import st_folium
 
-from auditor.download import DEFAULT_URL, data_dir, download_gtfs
+from auditor.download import (
+    DEFAULT_URL,
+    check_feed_update_available,
+    data_dir,
+    download_gtfs,
+    read_last_download_utc,
+)
 from auditor.segment_flags import annotate_segment_flags, flag_summary
 from auditor.segments import build_segment_table
 from auditor.excel_export import TripMeta, build_audit_excel_bytes
@@ -76,22 +83,84 @@ def _env(key: str, default: str | None = None) -> str | None:
     return v
 
 
-def _feed_info_summary(gtfs_dir: Path) -> str:
+def _format_feed_calendar_cell(raw: object) -> str:
+    """GTFS feed_info dates are often YYYYMMDD; show as DD/MM/YYYY."""
+    s = str(raw).strip() if raw is not None and pd.notna(raw) else ""
+    if len(s) == 8 and s.isdigit():
+        y, m, d = int(s[:4]), int(s[4:6]), int(s[6:8])
+        try:
+            return format_service_date_eu(date(y, m, d))
+        except ValueError:
+            return s
+    return s if s else "—"
+
+
+def _short_feed_version(v: str) -> str:
+    v = v.strip()
+    if len(v) <= 20:
+        return v
+    return f"{v[:8]}…{v[-4:]}"
+
+
+def _md_safe(s: str) -> str:
+    """Escape characters that would break Markdown emphasis/code in feed strings."""
+    return s.replace("\\", "\\\\").replace("`", "\\`").replace("*", "\\*")
+
+
+def _format_last_download_dublin(dt: datetime) -> str:
+    """UTC or aware datetime → DD/MM/YYYY HH:MM:SS in Europe/Dublin."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ZoneInfo("Europe/Dublin")).strftime("%d/%m/%Y %H:%M:%S")
+
+
+def _resolve_last_download_time(gtfs_dir: Path) -> datetime | None:
+    """Prefer on-disk marker from download; else session; else trips.txt mtime (legacy extracts)."""
+    recorded = read_last_download_utc(ROOT)
+    if recorded is not None:
+        return recorded
+    if "gtfs_downloaded_at" in st.session_state:
+        try:
+            raw = st.session_state["gtfs_downloaded_at"]
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    trips = gtfs_dir / "trips.txt"
+    if trips.exists():
+        try:
+            return datetime.fromtimestamp(trips.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            pass
+    return None
+
+
+def _render_feed_info(gtfs_dir: Path) -> None:
+    """Show feed_info.txt as a compact labelled block (not raw column names)."""
     p = gtfs_dir / "feed_info.txt"
     if not p.exists():
-        return "No feed_info.txt in this extract."
+        st.caption("No feed_info.txt in this extract.")
+        return
     try:
         df = pd.read_csv(p, dtype=str)
         if df.empty:
-            return "feed_info.txt is empty."
+            st.caption("feed_info.txt is empty.")
+            return
         row = df.iloc[0]
-        parts = []
-        for col in ("feed_publisher_name", "feed_version", "feed_start_date", "feed_end_date"):
-            if col in row.index and pd.notna(row[col]) and str(row[col]).strip():
-                parts.append(f"{col}: {row[col]}")
-        return " | ".join(parts) if parts else df.to_string()
+        pub = str(row.get("feed_publisher_name", "") or "").strip() or "—"
+        ver = str(row.get("feed_version", "") or "").strip()
+        d1 = _format_feed_calendar_cell(row.get("feed_start_date"))
+        d2 = _format_feed_calendar_cell(row.get("feed_end_date"))
+        ver_disp = _short_feed_version(ver) if ver else "—"
+        ps, d1s, d2s, vs = (_md_safe(x) for x in (pub, d1, d2, ver_disp))
+        # Native bordered container follows Streamlit light/dark theme (no fixed light-gray panel).
+        with st.container(border=True):
+            st.markdown(
+                f"**GTFS feed** · {ps}  \n"
+                f"**Valid in feed** {d1s} – {d2s}  \n"
+                f"**Version** `{vs}`",
+            )
     except Exception as exc:  # noqa: BLE001
-        return f"Could not read feed_info: {exc}"
+        st.caption(f"Could not read feed_info: {exc}")
 
 
 st.set_page_config(page_title="Dublin Bus schedule auditor", layout="wide")
@@ -107,23 +176,46 @@ api_key = _env("NTA_API_KEY")
 with st.sidebar:
     st.subheader("GTFS data")
     st.text(f"Folder: {gtfs_dir}")
+    _last_dl = _resolve_last_download_time(gtfs_dir)
+    if _last_dl is not None:
+        st.caption(
+            f"Last downloaded: **{_format_last_download_dublin(_last_dl)}** (Europe/Dublin)"
+        )
+    else:
+        st.caption("Last downloaded: — (not yet on this machine)")
+    if st.button(
+        "Check for update",
+        key="gtfs_check_update",
+        help="HEAD request against the feed URL: compares ETag / Last-Modified to your last download. Does not download data.",
+    ):
+        with st.spinner("Checking remote feed…"):
+            st.session_state["gtfs_check_result"] = check_feed_update_available(dl_url, api_key, ROOT)
+    if "gtfs_check_result" in st.session_state:
+        _cr = st.session_state["gtfs_check_result"]
+        if _cr.kind == "newer":
+            st.warning(_cr.message)
+        elif _cr.kind == "current":
+            st.success(_cr.message)
+        elif _cr.kind == "error":
+            st.error(_cr.message)
+        else:
+            st.info(_cr.message)
     if st.button("Download / refresh GTFS"):
         with st.spinner("Downloading and extracting…"):
             try:
                 _, at = download_gtfs(dl_url, api_key, ROOT)
                 st.session_state["gtfs_downloaded_at"] = at.isoformat()
+                st.session_state.pop("gtfs_check_result", None)
                 st.success("Done.")
             except Exception as e:  # noqa: BLE001
                 st.error(str(e))
-    if "gtfs_downloaded_at" in st.session_state:
-        st.caption(f"Last download (UTC): {st.session_state['gtfs_downloaded_at']}")
 
 ready = (gtfs_dir / "trips.txt").exists()
 if not ready:
     st.warning("Download GTFS using the sidebar before running an audit.")
     st.stop()
 
-st.caption(_feed_info_summary(gtfs_dir))
+_render_feed_info(gtfs_dir)
 
 init_audit_widget_defaults()
 hydrate_from_url_once()
@@ -291,9 +383,10 @@ with st.expander("What flags mean (heuristics)"):
         | **No schedule time** | Arrival at B is not after departure at A in the feed (or zero seconds). Speed is not computed. |
         | **Tiny shape distance** | The two stops project to the same place on the polyline (under about **1 m**). Check duplicate stops or shape alignment. |
         | **Tight schedule** | Implied **average** speed is **≥ 55 km/h** — timetable is tight vs the mapped distance. |
-        | **Slower than typical for this trip** | Only when the trip has enough segments: this leg’s implied speed is **well below** the **median** implied speed on *this same trip* (and the trip median is not already “all slow”). Ignores absolute limits — a **24 km/h** leg on a fully congested trip is not flagged. |
+        | **Slow implied speed on long segment** | Shape distance **≥ about 1 km** but implied average **under ~38 km/h**. Flags **through** legs where the timetable allows a very low average over distance — **not** a speed-limit check (GTFS has no road class). Short segments are excluded so small congested hops are not flagged. |
+        | **Slower than typical for this trip** | When the trip has enough segments: this leg is **well below** the trip **median** implied speed (and the trip is not already uniformly slow). |
 
-        Trip-relative settings (`median ratio`, `floor`, min segment count) are in `auditor/segment_flags.py`.
+        Thresholds are in `auditor/segment_flags.py` (`LONG_SEGMENT_*`, trip-relative constants).
         """
     )
 

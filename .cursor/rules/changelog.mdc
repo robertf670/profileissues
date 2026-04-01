@@ -1,0 +1,29 @@
+---
+description: Keep CHANGELOG.md updated (Keep a Changelog, SemVer)
+alwaysApply: true
+---
+
+# Changelog
+
+This project uses **[Keep a Changelog](https://keepachangelog.com/)** style in **`CHANGELOG.md`**.
+
+## When to edit
+
+- After **user-visible** changes (UI, exports, flags, GTFS behaviour, env vars, docs that ship with the app): add bullets under **`## [Unreleased]`** in the right subsection (**Added** / **Changed** / **Fixed** / **Removed**).
+- **Internal-only** refactors with no behaviour change: usually omit, unless it affects maintainers.
+
+## How to write entries
+
+- **Past tense**, one idea per bullet, link issues/PRs only if the repo already uses them.
+- Do **not** duplicate the entire app description; summarize the delta.
+
+## Cutting a release
+
+- Move content from **`[Unreleased]`** into a new **`## [x.y.z] — YYYY-MM-DD`** section (follow [SemVer](https://semver.org/) for `x.y.z`).
+- Reset **`[Unreleased]`** to empty subsection placeholders.
+- Update the **footer compare links** at the bottom of `CHANGELOG.md` so `[Unreleased]` points to `compare/vx.y.z...HEAD` and the new version has a sensible `compare` range (see existing links).
+
+## Anti-patterns
+
+- Leaving **`[Unreleased]`** empty while shipping features in the same branch for a long time.
+- Version bumps in `CHANGELOG.md` without a matching **git tag** `vx.y.z` when you actually release.

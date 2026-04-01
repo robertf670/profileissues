@@ -11,9 +11,15 @@ HIGH_IMPLIED_SPEED_KMH = 55.0
 # Stops that project to the same place on the polyline.
 TINY_DISTANCE_M = 1.0
 
-# --- Trip-relative "slow" (replaces absolute km/h thresholds) ---
-# We do NOT flag "low km/h" vs the speed limit — many legs are naturally slow.
-# We only flag when this segment is much slower than *other segments on the same trip*,
+# --- Long-segment low implied speed (not a legal limit; GTFS has no road class) ---
+# On legs long enough to be a "through" segment, a very low *average* vs distance often means
+# timetable padding, congestion modelled as time, or shape mismatch — worth a look on dual carriageways etc.
+# Short hops stay excluded so naturally slow city blocks (e.g. under 500 m between lights) do not flag.
+LONG_SEGMENT_MIN_M = 1000.0
+LONG_SEGMENT_SLOW_IMPLIED_KMH = 38.0
+
+# --- Trip-relative "slow" ---
+# We also flag when this segment is much slower than *other segments on the same trip*,
 # and the trip as a whole is not already uniformly slow.
 RELATIVE_SLOW_MIN_TRIP_SEGMENTS = 6
 RELATIVE_SLOW_MIN_DISTANCE_M = 200.0
@@ -37,6 +43,13 @@ def annotate_segment_flags(rows: list[SegmentRow]) -> None:
             continue
         if row.speed_kmh >= HIGH_IMPLIED_SPEED_KMH:
             row.flags.append(f"Tight schedule (implied ≥{HIGH_IMPLIED_SPEED_KMH:.0f} km/h)")
+        if (
+            row.distance_m >= LONG_SEGMENT_MIN_M
+            and row.speed_kmh < LONG_SEGMENT_SLOW_IMPLIED_KMH
+        ):
+            row.flags.append(
+                f"Slow implied speed on long segment (≥{LONG_SEGMENT_MIN_M:.0f} m, implied <{LONG_SEGMENT_SLOW_IMPLIED_KMH:.0f} km/h)"
+            )
 
     _annotate_slow_vs_trip_median(rows)
 
