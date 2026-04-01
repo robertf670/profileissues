@@ -39,6 +39,7 @@ from auditor.time_util import (
     parse_typed_departure_time,
 )
 from auditor.trip_match import (
+    first_stop_departures,
     load_core_tables,
     load_stops,
     match_trip,
@@ -161,6 +162,128 @@ def _route_scan_csv_text(rs: dict) -> str:
     else:
         cw.writerow(["(No problem trips — table empty.)"])
     return buf.getvalue()
+
+
+def _safe_filename_part(s: str, max_len: int = 64) -> str:
+    out = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s))
+    return out[:max_len] if len(out) > max_len else out
+
+
+def _render_single_trip_drilldown(
+    gtfs_dir: Path,
+    trip_id: str,
+    service_date: date,
+    route_short: str,
+) -> None:
+    """Full segment table, map, flags, downloads for one trip_id (used from route scan only)."""
+    _, trips, _, _ = load_core_tables(gtfs_dir)
+    st_times = stop_times_for_trip(gtfs_dir, trip_id)
+    if st_times.empty:
+        st.error("No stop times for this trip.")
+        return
+    shape_df = shape_for_trip(gtfs_dir, trips, trip_id)
+    stops = load_stops(gtfs_dir)
+    rows, err = build_segment_table(st_times, stops, shape_df)
+    if err:
+        st.error(err)
+        return
+    annotate_segment_flags(rows)
+
+    tmatch = trips[trips["trip_id"].astype(str) == str(trip_id)]
+    if tmatch.empty:
+        st.error("Trip not found in trips.txt.")
+        return
+    did = int(float(str(tmatch.iloc[0].get("direction_id", 0))))
+    direction_label = "Outbound" if did == 0 else "Inbound" if did == 1 else f"GTFS {did}"
+    fd = first_stop_departures(st_times)
+    dep_raw = str(fd.iloc[0]["departure_time"])
+    terminus_dep_display = format_gtfs_time_display(dep_raw)
+    trip_meta: TripMeta = {
+        "route": route_short.strip(),
+        "direction": direction_label,
+        "terminus_departure": terminus_dep_display,
+        "service_date_display": format_service_date_eu(service_date),
+        "day_type": day_type_label(service_date),
+    }
+
+    st.markdown(f"### Trip **{trip_id}**")
+
+    folium_map = build_route_map(shape_df, st_times, stops)
+    if folium_map is not None:
+        st.caption(
+            "Blue line: GTFS **shape**. Red dots: **stops** on this trip. "
+            "Map data © OpenStreetMap contributors."
+        )
+        st_folium(
+            folium_map,
+            use_container_width=True,
+            height=480,
+            returned_objects=[],
+            key=f"route_scan_map_{_safe_filename_part(trip_id)}",
+        )
+
+    st.markdown(
+        f"**Trip** · Route **{trip_meta['route']}** · **{trip_meta['direction']}** · "
+        f"Terminus departure **{trip_meta['terminus_departure']}**"
+    )
+
+    n_flagged, flag_buckets = flag_summary(rows)
+    if n_flagged:
+        parts = [f"{k}: {v}" for k, v in sorted(flag_buckets.items(), key=lambda x: (-x[1], x[0]))]
+        st.warning("**" + str(n_flagged) + "** segment(s) flagged — " + " · ".join(parts))
+    else:
+        st.caption("No heuristic flags on this trip (defaults in `auditor/segment_flags.py`).")
+
+    df = pd.DataFrame(
+        {
+            "From stop": [r.from_stop_name for r in rows],
+            "To stop": [r.to_stop_name for r in rows],
+            "Timetable depart (from)": [format_gtfs_time_display(r.depart_from_scheduled) for r in rows],
+            "Timetable arrive (to)": [format_gtfs_time_display(r.arrive_to_scheduled) for r in rows],
+            "Distance along shape (m)": [round(r.distance_m, 1) for r in rows],
+            "Scheduled time (s)": [r.time_s for r in rows],
+            "Scheduled time (M:SS)": [format_duration_m_ss(r.time_s) for r in rows],
+            "Implied speed (km/h)": [round(r.speed_kmh, 2) if r.speed_kmh is not None else None for r in rows],
+            "Flag(s)": ["; ".join(r.flags) if r.flags else "—" for r in rows],
+        }
+    )
+
+    st.markdown(_AUDIT_TABLE_CSS, unsafe_allow_html=True)
+    st.dataframe(_audit_table_for_display(df), use_container_width=True, hide_index=True)
+
+    _sn = _safe_filename_part(route_short.strip())
+    _tid = _safe_filename_part(trip_id)
+    base_name = f"RouteScan_{_sn}_trip_{_tid}"
+
+    csv_buf = StringIO()
+    cw = csv.writer(csv_buf)
+    cw.writerow(["Trip ID", trip_id])
+    cw.writerow(["Route number", trip_meta["route"]])
+    cw.writerow(["Direction", trip_meta["direction"]])
+    cw.writerow(["Terminus departure (scheduled)", trip_meta["terminus_departure"]])
+    cw.writerow(["Service date", trip_meta["service_date_display"]])
+    cw.writerow(["Day type", trip_meta["day_type"]])
+    cw.writerow([])
+    df.to_csv(csv_buf, index=False)
+    xlsx_bytes = build_audit_excel_bytes(df, trip_meta)
+
+    d1, d2 = st.columns(2)
+    with d1:
+        st.download_button(
+            "Download this trip (Excel)",
+            data=xlsx_bytes,
+            file_name=f"{base_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"route_scan_detail_xlsx_{_tid}",
+        )
+    with d2:
+        st.download_button(
+            "Download this trip (CSV)",
+            data=csv_buf.getvalue(),
+            file_name=f"{base_name}.csv",
+            mime="text/csv",
+            key=f"route_scan_detail_csv_{_tid}",
+        )
 
 
 def _route_scan_sidebar_visible() -> bool:
@@ -297,6 +420,7 @@ with st.sidebar:
             help="Default: both. Narrow to one direction if you prefer.",
         )
         if st.button("Scan route for flags", key="scan_route_btn", type="secondary"):
+            st.session_state.pop("route_scan_drill_trip_id", None)
             _rname = str(_scan_route_in or "").strip()
             if not _rname:
                 st.session_state["_route_scan_result"] = {"error": "Enter a route number."}
@@ -333,6 +457,7 @@ with st.sidebar:
                         "with_errors": sum(1 for r in _rows if r.error),
                         "df": trip_scan_rows_to_dataframe(_problem),
                         "messages": _msgs,
+                        "all_trip_ids": [str(x) for x in _id_list],
                     }
 
 _render_feed_info(gtfs_dir)
@@ -381,6 +506,43 @@ if _rs is not None:
                     mime="text/csv",
                     key="download_route_scan_csv",
                 )
+
+            _all_ids = _rs.get("all_trip_ids") or []
+            if _all_ids:
+                st.divider()
+                st.markdown("**Open one trip** — loads segments, map, and trip exports **only for that trip** (not all scanned trips).")
+                _rp = st.columns([4, 1, 1])
+                with _rp[0]:
+                    _trip_pick = st.selectbox(
+                        "Choose trip ID",
+                        options=sorted(_all_ids),
+                        key="route_scan_drill_pick",
+                        help="Pick a trip from this scan, then click **Load trip detail**.",
+                    )
+                with _rp[1]:
+                    _load_drill = st.button("Load trip detail", key="route_scan_drill_load", type="primary")
+                with _rp[2]:
+                    _clear_drill = st.button("Clear", key="route_scan_drill_clear")
+                if _load_drill:
+                    st.session_state["route_scan_drill_trip_id"] = str(_trip_pick)
+                if _clear_drill:
+                    st.session_state.pop("route_scan_drill_trip_id", None)
+
+                _allowed = set(_all_ids)
+                _drill_id = st.session_state.get("route_scan_drill_trip_id")
+                if _drill_id and str(_drill_id) in _allowed:
+                    with st.spinner("Loading trip…"):
+                        _render_single_trip_drilldown(
+                            gtfs_dir,
+                            str(_drill_id),
+                            _rs["date"],
+                            str(_rs["route"]),
+                        )
+                elif _drill_id and str(_drill_id) not in _allowed:
+                    st.caption(
+                        "Stored trip is not from the latest scan — run **Scan route** again, "
+                        "or click **Load trip detail** after choosing a trip."
+                    )
 
 init_audit_widget_defaults()
 hydrate_from_url_once()

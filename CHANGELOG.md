@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] — 2026-03-31
+
+### Added
+
+- **Route scan → Open one trip**: after a scan, pick a **trip ID**, click **Load trip detail** to load segments, map, and **per-trip** Excel/CSV for **that trip only** (other scanned trips stay summary-only). **Clear** removes the detail; a **new scan** clears the previous selection
+
+### Notes
+
+- **Implied speed** is **shape distance** between consecutive stops divided by **scheduled** time from departure at stop *i* to arrival at stop *i+1*. It does **not** model road class, turns, roundabouts, traffic signals, or congestion—only what the timetable allows across the GTFS polyline segment
+
+---
+
 ## [1.4.0] — 2026-04-04
 
 ### Added
@@ -93,7 +105,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/robertf670/profileissues/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/robertf670/profileissues/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/robertf670/profileissues/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/robertf670/profileissues/compare/v1.1.0...v1.2.0
