@@ -11,13 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Headsign** removed from the audit form (matching always ignores headsign); URL sync no longer stores `hs`
-- **`_env()`** also reads **Streamlit Community Cloud** secrets (`st.secrets`) so `NTA_API_KEY` / `GTFS_DOWNLOAD_URL` work without a `.env` file on Cloud
-- **README**: deployment section for **Streamlit Community Cloud** (share.streamlit.io, secrets TOML, first-run GTFS note)
-
 ### Fixed
 
 ### Removed
+
+---
+
+## [1.3.0] — 2026-04-03
+
+### Changed
+
+- **Headsign** removed from the audit form (matching always ignores headsign); URL sync no longer stores `hs`
+- **`_env()`** also reads **Streamlit Community Cloud** secrets (`st.secrets`) so `NTA_API_KEY` / `GTFS_DOWNLOAD_URL` work without a `.env` file on Cloud
+- **README**: deployment section for **Streamlit Community Cloud** (share.streamlit.io, secrets TOML, first-run GTFS note)
 
 ---
 
@@ -74,7 +80,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/robertf670/profileissues/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/robertf670/profileissues/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/robertf670/profileissues/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/robertf670/profileissues/releases/tag/v1.0.0
