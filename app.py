@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from io import StringIO
@@ -20,9 +21,15 @@ from auditor.download import (
     download_gtfs,
     read_last_download_utc,
 )
+from auditor.route_scan import (
+    empty_route_scan_export_df,
+    list_trip_ids_for_route_day,
+    scan_trips_for_flags,
+    trip_scan_rows_to_dataframe,
+)
 from auditor.segment_flags import annotate_segment_flags, flag_summary
 from auditor.segments import build_segment_table
-from auditor.excel_export import TripMeta, build_audit_excel_bytes
+from auditor.excel_export import TripMeta, build_audit_excel_bytes, build_route_scan_excel_bytes
 from auditor.route_map import build_route_map
 from auditor.time_util import (
     day_type_label,
@@ -120,6 +127,45 @@ def _format_last_download_dublin(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(ZoneInfo("Europe/Dublin")).strftime("%d/%m/%Y %H:%M:%S")
+
+
+def _route_scan_meta_strings(rs: dict) -> dict[str, str]:
+    """Strings for route-scan CSV/Excel headers."""
+    scanned = str(rs["total"])
+    if rs.get("truncated"):
+        scanned = f"{rs['total']} (of {rs['total_in_feed']} in feed; capped at 500)"
+    return {
+        "route": str(rs["route"]),
+        "service_date": format_service_date_eu(rs["date"]),
+        "directions": str(rs["directions"]),
+        "trips_scanned": scanned,
+        "with_flags": str(rs["with_flags"]),
+        "with_errors": str(rs["with_errors"]),
+    }
+
+
+def _route_scan_csv_text(rs: dict) -> str:
+    buf = StringIO()
+    cw = csv.writer(buf)
+    m = _route_scan_meta_strings(rs)
+    cw.writerow(["Route", m["route"]])
+    cw.writerow(["Service date", m["service_date"]])
+    cw.writerow(["Directions", m["directions"]])
+    cw.writerow(["Trips scanned", m["trips_scanned"]])
+    cw.writerow(["Trips with ≥1 flagged segment", m["with_flags"]])
+    cw.writerow(["Trips with build errors", m["with_errors"]])
+    cw.writerow([])
+    df = rs.get("df")
+    if df is not None and not df.empty:
+        df.to_csv(buf, index=False)
+    else:
+        cw.writerow(["(No problem trips — table empty.)"])
+    return buf.getvalue()
+
+
+def _route_scan_sidebar_visible() -> bool:
+    """Batch route scan: on everywhere unless opted out via HIDE_ROUTE_SCAN=1 (env or Streamlit secrets)."""
+    return os.getenv("HIDE_ROUTE_SCAN", "").lower() not in ("1", "true", "yes")
 
 
 def _resolve_last_download_time(gtfs_dir: Path) -> datetime | None:
@@ -223,7 +269,118 @@ if not ready:
     st.warning("Download GTFS using the sidebar before running an audit.")
     st.stop()
 
+with st.sidebar:
+    if _route_scan_sidebar_visible():
+        st.divider()
+        st.subheader("Route scan")
+        st.caption(
+            "Every trip on one route for a day; lists trips with segment flags or errors. "
+            "Can be CPU-heavy on large routes (max 500 trips). Set `HIDE_ROUTE_SCAN=1` in "
+            "`.env` or Streamlit secrets to hide this block."
+        )
+        _scan_route_in = st.text_input(
+            "Route number",
+            key="scan_route_short",
+            placeholder="e.g. 39",
+            help="Same as main form: routes.route_short_name.",
+        )
+        _scan_day = st.date_input(
+            "Service date",
+            format="DD/MM/YYYY",
+            key="scan_route_date",
+        )
+        _scan_dirs = st.multiselect(
+            "Directions",
+            options=[0, 1],
+            default=[0, 1],
+            format_func=lambda x: "Outbound (GTFS 0)" if x == 0 else "Inbound (GTFS 1)",
+            help="Default: both. Narrow to one direction if you prefer.",
+        )
+        if st.button("Scan route for flags", key="scan_route_btn", type="secondary"):
+            _rname = str(_scan_route_in or "").strip()
+            if not _rname:
+                st.session_state["_route_scan_result"] = {"error": "Enter a route number."}
+            else:
+                _dirs = tuple(_scan_dirs) if _scan_dirs else (0, 1)
+                _ids, _msgs = list_trip_ids_for_route_day(gtfs_dir, _scan_day, _rname, _dirs)
+                if not _ids:
+                    st.session_state["_route_scan_result"] = {
+                        "error": "; ".join(_msgs) if _msgs else "No trips found.",
+                        "messages": _msgs,
+                    }
+                else:
+                    _cap = 500
+                    _trunc = len(_ids) > _cap
+                    _id_list = _ids[:_cap]
+                    _prog = st.progress(0)
+
+                    def _cb(cur: int, total: int) -> None:
+                        _prog.progress(min(1.0, cur / total))
+
+                    try:
+                        _rows = scan_trips_for_flags(gtfs_dir, _id_list, on_progress=_cb)
+                    finally:
+                        _prog.empty()
+                    _problem = [r for r in _rows if r.flagged_segments > 0 or r.error]
+                    st.session_state["_route_scan_result"] = {
+                        "route": _rname,
+                        "date": _scan_day,
+                        "directions": _dirs,
+                        "total": len(_rows),
+                        "total_in_feed": len(_ids),
+                        "truncated": _trunc,
+                        "with_flags": sum(1 for r in _rows if r.flagged_segments > 0),
+                        "with_errors": sum(1 for r in _rows if r.error),
+                        "df": trip_scan_rows_to_dataframe(_problem),
+                        "messages": _msgs,
+                    }
+
 _render_feed_info(gtfs_dir)
+
+_rs = st.session_state.get("_route_scan_result")
+if _rs is not None:
+    with st.expander("Route scan results", expanded=True):
+        if _rs.get("error"):
+            st.warning(_rs["error"])
+        else:
+            st.markdown(
+                f"**Route {_rs['route']}** · **{format_service_date_eu(_rs['date'])}** · "
+                f"directions `{_rs['directions']}` · scanned **{_rs['total']}** trip(s)"
+                + (f" (of {_rs['total_in_feed']} in feed; capped)" if _rs.get("truncated") else "")
+            )
+            if _rs.get("messages"):
+                for _m in _rs["messages"]:
+                    st.caption(_m)
+            st.caption(
+                f"Trips with ≥1 flagged segment: **{_rs['with_flags']}** · "
+                f"Build errors: **{_rs['with_errors']}**"
+            )
+            _df = _rs.get("df")
+            if _df is not None and not _df.empty:
+                st.dataframe(_df, use_container_width=True, hide_index=True)
+            elif not _rs.get("error"):
+                st.success("No problematic trips in this scan (no segment flags and no build errors).")
+            _rs_base = f"RouteScan_{str(_rs['route']).strip()}_{_rs['date'].strftime('%Y%m%d')}"
+            _csv_route = _route_scan_csv_text(_rs)
+            _df_xlsx = _df if _df is not None and not _df.empty else empty_route_scan_export_df()
+            _xlsx_route = build_route_scan_excel_bytes(_df_xlsx, _route_scan_meta_strings(_rs))
+            _dlr1, _dlr2 = st.columns(2)
+            with _dlr1:
+                st.download_button(
+                    "Download route scan (Excel)",
+                    data=_xlsx_route,
+                    file_name=f"{_rs_base}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_route_scan_xlsx",
+                )
+            with _dlr2:
+                st.download_button(
+                    "Download route scan (CSV)",
+                    data=_csv_route,
+                    file_name=f"{_rs_base}.csv",
+                    mime="text/csv",
+                    key="download_route_scan_csv",
+                )
 
 init_audit_widget_defaults()
 hydrate_from_url_once()

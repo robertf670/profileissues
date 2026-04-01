@@ -93,3 +93,73 @@ def build_audit_excel_bytes(df: pd.DataFrame, meta: TripMeta) -> bytes:
 
     buf.seek(0)
     return buf.getvalue()
+
+
+# Route scan: six meta rows, blank row 7, table header row 8 → startrow=7 (0-indexed).
+_ROUTE_SCAN_TABLE_STARTROW = 7
+
+
+def build_route_scan_excel_bytes(df: pd.DataFrame, meta: dict[str, str]) -> bytes:
+    """Route scan summary + problem-trips table (same styling idea as schedule audit)."""
+    buf = BytesIO()
+    sheet_name = "Route scan"
+
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=_ROUTE_SCAN_TABLE_STARTROW)
+        ws = writer.sheets[sheet_name]
+
+        label_font = Font(bold=True, size=11)
+        meta_fill = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
+        thin = Side(style="thin", color="CBD5E1")
+        grid = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        pairs = [
+            ("Route", meta["route"]),
+            ("Service date", meta["service_date"]),
+            ("Directions", meta["directions"]),
+            ("Trips scanned", meta["trips_scanned"]),
+            ("Trips with ≥1 flagged segment", meta["with_flags"]),
+            ("Trips with build errors", meta["with_errors"]),
+        ]
+        for i, (a, b) in enumerate(pairs, start=1):
+            ws[f"A{i}"], ws[f"B{i}"] = a, b
+            ws.cell(row=i, column=1).font = label_font
+            ws.cell(row=i, column=1).fill = meta_fill
+            ws.cell(row=i, column=2).fill = meta_fill
+            ws.cell(row=i, column=1).border = grid
+            ws.cell(row=i, column=2).border = grid
+            ws.cell(row=i, column=1).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            ws.cell(row=i, column=2).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        header_row = _ROUTE_SCAN_TABLE_STARTROW + 1
+        header_fill = PatternFill(start_color="1D4ED8", end_color="1D4ED8", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+
+        for cell in ws[header_row]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = grid
+
+        for r in range(header_row + 1, ws.max_row + 1):
+            for c_idx in range(1, len(df.columns) + 1):
+                cell = ws.cell(row=r, column=c_idx)
+                cell.border = grid
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        for c_idx, col_name in enumerate(df.columns, start=1):
+            letter = get_column_letter(c_idx)
+            sample = [len(str(col_name))]
+            if len(df) > 0:
+                sample.append(int(df[col_name].astype(str).str.len().max()))
+            w = min(max(sample) + 2, 60)
+            ws.column_dimensions[letter].width = w
+
+        ws.freeze_panes = ws.cell(row=header_row + 1, column=1).coordinate
+        ws.sheet_view.zoomScale = 110
+        if ws.max_row >= header_row and len(df.columns) > 0:
+            last_col = get_column_letter(len(df.columns))
+            ws.auto_filter.ref = f"A{header_row}:{last_col}{ws.max_row}"
+
+    buf.seek(0)
+    return buf.getvalue()

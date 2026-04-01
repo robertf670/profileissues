@@ -19,6 +19,14 @@ A small **Streamlit** app for Dublin Bus drivers and anyone auditing **published
 
 See **[CHANGELOG.md](CHANGELOG.md)** for version history and how we track changes.
 
+### Route scan
+
+In the **sidebar**, **Route scan** runs the same segment/flag logic on **every trip** for a chosen **route**, **service date**, and **direction(s)** (default: outbound and inbound). Results open in **Route scan results** on the main page: trips with **any flagged segment** or a **build error**. Large routes are capped at **500** trips per run (can be slow on Streamlit Cloud for busy routes).
+
+Set **`HIDE_ROUTE_SCAN=1`** in `.env` or **Streamlit secrets** if you want to hide this block (e.g. shared public deployment).
+
+After a scan, use **Download route scan (CSV)** or **(Excel)** in the results expander for the same table plus summary metadata.
+
 ---
 
 ## Requirements

@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] — 2026-04-04
+
+### Added
+
+- **Sidebar → Route scan**: batch scan all trips for a route + calendar day + direction(s); main-area **Route scan results** table of trips with segment flags or build errors (max **500** trips per run)
+- **Route scan export**: **CSV** and **Excel** (summary metadata + problem trips table; empty table if none flagged)
+
+### Changed
+
+- **Route scan** is **enabled on Streamlit Community Cloud** by default (same as local). Opt out with **`HIDE_ROUTE_SCAN=1`** in environment or Streamlit secrets if needed
+
+---
+
 ## [1.3.0] — 2026-04-03
 
 ### Changed
@@ -80,7 +93,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/robertf670/profileissues/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/robertf670/profileissues/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/robertf670/profileissues/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/robertf670/profileissues/compare/v1.0.0...v1.1.0
