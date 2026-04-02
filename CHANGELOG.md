@@ -17,6 +17,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.0] — 2026-04-05
+
+### Added
+
+- **Disclaimer** at the top of the app: implied speed does not model traffic, congestion, turns, roundabouts, signals, or road class
+
+### Changed
+
+- **Export downloads**: spacing above the exports; **Excel** and **CSV** stacked vertically (CSV under Excel)
+
+### Fixed
+
+- **Segment table** and **route scan results** (problem trips list): long cells use a real HTML table (Streamlit’s dataframe grid draws on canvas and clips text); each table sits in the same **bounded box** that scrolls horizontally and **vertically** so long lists do not fill the whole page
+
+### Removed
+
+- Idle-state line: “Set inputs and click Run audit…” before the first run
+
+---
+
 ## [1.5.0] — 2026-03-31
 
 ### Added
@@ -105,7 +125,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/robertf670/profileissues/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/robertf670/profileissues/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/robertf670/profileissues/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/robertf670/profileissues/compare/v1.2.0...v1.3.0

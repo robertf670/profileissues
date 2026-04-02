@@ -56,10 +56,46 @@ ROOT = Path(__file__).resolve().parent
 # Use a display-only frame with formatted strings so floats don't show as 392.500000.
 _AUDIT_TABLE_CSS = """
 <style>
-[data-testid="stDataFrame"] table thead th,
-[data-testid="stDataFrame"] table tbody td {
-    text-align: center !important;
+/* Bounded HTML tables (segment audit + route scan summary): not Glide canvas; scroll inside box. */
+.bounded-html-table-wrap {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    max-height: min(65vh, 28rem);
+    border-radius: 0.35rem;
+    border: 1px solid rgba(128, 128, 128, 0.28);
+}
+.bounded-html-table {
+    width: max-content;
+    border-collapse: collapse;
+}
+.bounded-html-table th,
+.bounded-html-table td {
+    text-align: center;
     vertical-align: middle;
+    padding: 0.35rem 0.75rem;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.28);
+}
+.bounded-html-table th {
+    font-weight: 600;
+    white-space: nowrap;
+}
+.bounded-html-table.segment-audit th:last-child,
+.bounded-html-table.segment-audit td:last-child {
+    text-align: left;
+    white-space: normal;
+    word-break: break-word;
+    min-width: 16rem;
+}
+/* Flag notes + Error (columns 7–8 in trip_scan_rows_to_dataframe order). */
+.bounded-html-table.route-scan-results th:nth-child(7),
+.bounded-html-table.route-scan-results td:nth-child(7),
+.bounded-html-table.route-scan-results th:nth-child(8),
+.bounded-html-table.route-scan-results td:nth-child(8) {
+    text-align: left;
+    white-space: normal;
+    word-break: break-word;
+    min-width: 10rem;
 }
 </style>
 """
@@ -80,6 +116,30 @@ def _audit_table_for_display(df: pd.DataFrame) -> pd.DataFrame:
     if "Flag(s)" in out.columns:
         out["Flag(s)"] = out["Flag(s)"].astype(str)
     return out
+
+
+def _render_segment_audit_table(df: pd.DataFrame) -> None:
+    """Show segment rows as HTML (not ``st.dataframe``): Streamlit uses a canvas grid that clips long cells."""
+    disp = _audit_table_for_display(df)
+    html_table = disp.to_html(index=False, classes="bounded-html-table segment-audit", escape=True)
+    st.markdown(
+        f'<div class="bounded-html-table-wrap">{html_table}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_route_scan_results_table(df: pd.DataFrame) -> None:
+    """Same bounded HTML table as segment audit; summary has long flag notes / errors."""
+    html_table = df.to_html(index=False, classes="bounded-html-table route-scan-results", escape=True)
+    st.markdown(
+        f'<div class="bounded-html-table-wrap">{html_table}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _export_download_row() -> None:
+    """Margin above export buttons (Excel and CSV are stacked below)."""
+    st.markdown('<div style="margin-top: 1.5rem;"></div>', unsafe_allow_html=True)
 
 
 def _env(key: str, default: str | None = None) -> str | None:
@@ -248,8 +308,7 @@ def _render_single_trip_drilldown(
         }
     )
 
-    st.markdown(_AUDIT_TABLE_CSS, unsafe_allow_html=True)
-    st.dataframe(_audit_table_for_display(df), use_container_width=True, hide_index=True)
+    _render_segment_audit_table(df)
 
     _sn = _safe_filename_part(route_short.strip())
     _tid = _safe_filename_part(trip_id)
@@ -267,23 +326,21 @@ def _render_single_trip_drilldown(
     df.to_csv(csv_buf, index=False)
     xlsx_bytes = build_audit_excel_bytes(df, trip_meta)
 
-    d1, d2 = st.columns(2)
-    with d1:
-        st.download_button(
-            "Download this trip (Excel)",
-            data=xlsx_bytes,
-            file_name=f"{base_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"route_scan_detail_xlsx_{_tid}",
-        )
-    with d2:
-        st.download_button(
-            "Download this trip (CSV)",
-            data=csv_buf.getvalue(),
-            file_name=f"{base_name}.csv",
-            mime="text/csv",
-            key=f"route_scan_detail_csv_{_tid}",
-        )
+    _export_download_row()
+    st.download_button(
+        "Download this trip (Excel)",
+        data=xlsx_bytes,
+        file_name=f"{base_name}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"route_scan_detail_xlsx_{_tid}",
+    )
+    st.download_button(
+        "Download this trip (CSV)",
+        data=csv_buf.getvalue(),
+        file_name=f"{base_name}.csv",
+        mime="text/csv",
+        key=f"route_scan_detail_csv_{_tid}",
+    )
 
 
 def _route_scan_sidebar_visible() -> bool:
@@ -341,9 +398,16 @@ def _render_feed_info(gtfs_dir: Path) -> None:
 
 
 st.set_page_config(page_title="Dublin Bus schedule auditor", layout="wide")
+st.markdown(_AUDIT_TABLE_CSS, unsafe_allow_html=True)
 st.title("Dublin Bus schedule auditor")
 st.caption(
     "Stop-to-stop distance along the published shape, timetabled time, and implied speed (km/h) from GTFS."
+)
+st.info(
+    "**Not a traffic or driving model.** Implied speed is distance along the GTFS **shape** divided by "
+    "**scheduled** time between stops. It does **not** reflect real driving: there is no allowance for "
+    "traffic, congestion, turns, roundabouts, red lights, or road type—only what the timetable allows "
+    "across that polyline segment."
 )
 
 gtfs_dir = data_dir(ROOT)
@@ -482,30 +546,28 @@ if _rs is not None:
             )
             _df = _rs.get("df")
             if _df is not None and not _df.empty:
-                st.dataframe(_df, use_container_width=True, hide_index=True)
+                _render_route_scan_results_table(_df)
             elif not _rs.get("error"):
                 st.success("No problematic trips in this scan (no segment flags and no build errors).")
             _rs_base = f"RouteScan_{str(_rs['route']).strip()}_{_rs['date'].strftime('%Y%m%d')}"
             _csv_route = _route_scan_csv_text(_rs)
             _df_xlsx = _df if _df is not None and not _df.empty else empty_route_scan_export_df()
             _xlsx_route = build_route_scan_excel_bytes(_df_xlsx, _route_scan_meta_strings(_rs))
-            _dlr1, _dlr2 = st.columns(2)
-            with _dlr1:
-                st.download_button(
-                    "Download route scan (Excel)",
-                    data=_xlsx_route,
-                    file_name=f"{_rs_base}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_route_scan_xlsx",
-                )
-            with _dlr2:
-                st.download_button(
-                    "Download route scan (CSV)",
-                    data=_csv_route,
-                    file_name=f"{_rs_base}.csv",
-                    mime="text/csv",
-                    key="download_route_scan_csv",
-                )
+            _export_download_row()
+            st.download_button(
+                "Download route scan (Excel)",
+                data=_xlsx_route,
+                file_name=f"{_rs_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_route_scan_xlsx",
+            )
+            st.download_button(
+                "Download route scan (CSV)",
+                data=_csv_route,
+                file_name=f"{_rs_base}.csv",
+                mime="text/csv",
+                key="download_route_scan_csv",
+            )
 
             _all_ids = _rs.get("all_trip_ids") or []
             if _all_ids:
@@ -595,7 +657,6 @@ if submitted:
 
 can_run = submitted or st.session_state.get("_audit_keep") or st.session_state.get("_audit_restore")
 if not can_run:
-    st.info("Set inputs and click **Run audit**, or open a bookmarked link with your last audit.")
     st.stop()
 
 if not str(route).strip():
@@ -723,8 +784,7 @@ st.caption(
     "**Flag(s)** highlights segments that may deserve a second look."
 )
 
-st.markdown(_AUDIT_TABLE_CSS, unsafe_allow_html=True)
-st.dataframe(_audit_table_for_display(df), use_container_width=True, hide_index=True)
+_render_segment_audit_table(df)
 
 base_name = f"{route.strip()}_{hhmm.replace(':', '')}_Audit"
 
@@ -740,18 +800,16 @@ df.to_csv(csv_buf, index=False)
 
 xlsx_bytes = build_audit_excel_bytes(df, trip_meta)
 
-dl1, dl2 = st.columns(2)
-with dl1:
-    st.download_button(
-        "Download Excel (.xlsx)",
-        data=xlsx_bytes,
-        file_name=f"{base_name}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-with dl2:
-    st.download_button(
-        "Download CSV",
-        data=csv_buf.getvalue(),
-        file_name=f"{base_name}.csv",
-        mime="text/csv",
-    )
+_export_download_row()
+st.download_button(
+    "Download Excel (.xlsx)",
+    data=xlsx_bytes,
+    file_name=f"{base_name}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+st.download_button(
+    "Download CSV",
+    data=csv_buf.getvalue(),
+    file_name=f"{base_name}.csv",
+    mime="text/csv",
+)
