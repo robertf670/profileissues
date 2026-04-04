@@ -229,6 +229,31 @@ def _safe_filename_part(s: str, max_len: int = 64) -> str:
     return out[:max_len] if len(out) > max_len else out
 
 
+def _filename_ddmmyyyy(d: date) -> str:
+    return d.strftime("%d%m%Y")
+
+
+def _filename_in_out_from_direction_id(direction_id: int) -> str:
+    """GTFS 0 → OUT (outbound), 1 → IN (inbound); other values stay explicit."""
+    if direction_id == 0:
+        return "OUT"
+    if direction_id == 1:
+        return "IN"
+    return f"D{direction_id}"
+
+
+def _filename_in_out_from_route_scan_dirs(dirs: tuple) -> str:
+    """Route scan may use one or both directions."""
+    s = sorted({int(x) for x in dirs})
+    if s == [0, 1]:
+        return "IN_OUT"
+    if s == [0]:
+        return "OUT"
+    if s == [1]:
+        return "IN"
+    return "_".join(str(x) for x in s)
+
+
 def _render_single_trip_drilldown(
     gtfs_dir: Path,
     trip_id: str,
@@ -312,7 +337,9 @@ def _render_single_trip_drilldown(
 
     _sn = _safe_filename_part(route_short.strip())
     _tid = _safe_filename_part(trip_id)
-    base_name = f"RouteScan_{_sn}_trip_{_tid}"
+    base_name = (
+        f"RouteScan_{_sn}_{_filename_ddmmyyyy(service_date)}_{_filename_in_out_from_direction_id(did)}_trip_{_tid}"
+    )
 
     csv_buf = StringIO()
     cw = csv.writer(csv_buf)
@@ -549,7 +576,10 @@ if _rs is not None:
                 _render_route_scan_results_table(_df)
             elif not _rs.get("error"):
                 st.success("No problematic trips in this scan (no segment flags and no build errors).")
-            _rs_base = f"RouteScan_{str(_rs['route']).strip()}_{_rs['date'].strftime('%Y%m%d')}"
+            _rs_base = (
+                f"RouteScan_{str(_rs['route']).strip()}_{_filename_ddmmyyyy(_rs['date'])}_"
+                f"{_filename_in_out_from_route_scan_dirs(_rs['directions'])}"
+            )
             _csv_route = _route_scan_csv_text(_rs)
             _df_xlsx = _df if _df is not None and not _df.empty else empty_route_scan_export_df()
             _xlsx_route = build_route_scan_excel_bytes(_df_xlsx, _route_scan_meta_strings(_rs))
@@ -786,7 +816,10 @@ st.caption(
 
 _render_segment_audit_table(df)
 
-base_name = f"{route.strip()}_{hhmm.replace(':', '')}_Audit"
+base_name = (
+    f"{route.strip()}_{hhmm.replace(':', '')}_{_filename_ddmmyyyy(service_date)}_"
+    f"{_filename_in_out_from_direction_id(int(direction_id))}_Audit"
+)
 
 csv_buf = StringIO()
 cw = csv.writer(csv_buf)

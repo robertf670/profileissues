@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] — 2026-04-04
+
+### Changed
+
+- **Export filenames**: include **service date** as `DDMMYYYY` and direction as **`OUT`** / **`IN`** (GTFS 0 / 1); route scan with both directions uses **`IN_OUT`**
+
+---
+
 ## [1.6.0] — 2026-04-05
 
 ### Added
@@ -125,7 +133,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/robertf670/profileissues/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/robertf670/profileissues/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/robertf670/profileissues/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/robertf670/profileissues/compare/v1.3.0...v1.4.0
