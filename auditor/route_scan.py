@@ -68,6 +68,7 @@ class TripScanRow:
     direction_id: str
     direction_label: str
     first_departure: str
+    first_dep_raw: str
     headsign: str
     segments: int
     flagged_segments: int
@@ -104,6 +105,7 @@ def scan_trips_for_flags(
                     "",
                     "",
                     "",
+                    "",
                     0,
                     0,
                     "",
@@ -118,12 +120,14 @@ def scan_trips_for_flags(
 
         st_times = st_all[st_all["trip_id"].astype(str) == str(tid)].copy()
         if st_times.empty:
+            _raw_empty = str(first_map.get(tid, ""))
             out.append(
                 TripScanRow(
                     tid,
                     did,
                     dlabel,
-                    format_gtfs_time_display(str(first_map.get(tid, ""))),
+                    format_gtfs_time_display(_raw_empty),
+                    _raw_empty,
                     hs,
                     0,
                     0,
@@ -139,13 +143,15 @@ def scan_trips_for_flags(
         shape_df = shape_for_trip(gtfs_dir, trips, tid)
         rows, err = build_segment_table(st_times, stops, shape_df)
         if err:
-            dep = format_gtfs_time_display(str(first_map.get(tid, "")))
+            _raw_err = str(first_map.get(tid, ""))
+            dep = format_gtfs_time_display(_raw_err)
             out.append(
                 TripScanRow(
                     tid,
                     did,
                     dlabel,
                     dep,
+                    _raw_err,
                     hs,
                     0,
                     0,
@@ -165,13 +171,15 @@ def scan_trips_for_flags(
                     summaries.append(f)
         summary_txt = "; ".join(summaries[:8]) + (" …" if len(summaries) > 8 else "")
 
-        dep = format_gtfs_time_display(str(first_map.get(tid, "")))
+        _raw_ok = str(first_map.get(tid, ""))
+        dep = format_gtfs_time_display(_raw_ok)
         out.append(
             TripScanRow(
                 tid,
                 did,
                 dlabel,
                 dep,
+                _raw_ok,
                 hs,
                 n_seg,
                 flagged,

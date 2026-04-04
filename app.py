@@ -22,6 +22,7 @@ from auditor.download import (
     read_last_download_utc,
 )
 from auditor.route_scan import (
+    TripScanRow,
     empty_route_scan_export_df,
     list_trip_ids_for_route_day,
     scan_trips_for_flags,
@@ -37,6 +38,7 @@ from auditor.time_util import (
     format_gtfs_time_display,
     format_service_date_eu,
     parse_typed_departure_time,
+    time_to_seconds,
 )
 from auditor.trip_match import (
     first_stop_departures,
@@ -254,6 +256,32 @@ def _filename_in_out_from_route_scan_dirs(dirs: tuple) -> str:
     return "_".join(str(x) for x in s)
 
 
+def _route_scan_trip_sort_key(r: TripScanRow) -> tuple:
+    # getattr: session_state may hold TripScanRow instances from before first_dep_raw existed
+    raw = (getattr(r, "first_dep_raw", None) or "").strip()
+    try:
+        sec = time_to_seconds(raw) if raw and ":" in raw else 999_999
+    except (ValueError, TypeError):
+        sec = 999_999
+    try:
+        di = int(r.direction_id) if r.direction_id.isdigit() else 99
+    except ValueError:
+        di = 99
+    return (di, sec, r.trip_id)
+
+
+def _route_scan_trip_choice_label(r: TripScanRow) -> str:
+    dep = r.first_departure if r.first_departure and r.first_departure != "—" else "?"
+    d = r.direction_label or "?"
+    hs = (r.headsign or "").strip()
+    hs_short = hs[:50] + ("…" if len(hs) > 50 else "") if hs else ""
+    tid = r.trip_id
+    parts = [dep, d]
+    if hs_short:
+        parts.append(hs_short)
+    return " · ".join(parts) + f" ({tid})"
+
+
 def _render_single_trip_drilldown(
     gtfs_dir: Path,
     trip_id: str,
@@ -428,13 +456,17 @@ st.set_page_config(page_title="Dublin Bus schedule auditor", layout="wide")
 st.markdown(_AUDIT_TABLE_CSS, unsafe_allow_html=True)
 st.title("Dublin Bus schedule auditor")
 st.caption(
-    "Stop-to-stop distance along the published shape, timetabled time, and implied speed (km/h) from GTFS."
+    "Compares the **published timetable** to **distance along the GTFS shape** between consecutive stops."
 )
 st.info(
-    "**Not a traffic or driving model.** Implied speed is distance along the GTFS **shape** divided by "
-    "**scheduled** time between stops. It does **not** reflect real driving: there is no allowance for "
-    "traffic, congestion, turns, roundabouts, red lights, or road type—only what the timetable allows "
-    "across that polyline segment."
+    "**What this is:** for each stop-to-stop segment, **implied speed** is a single **average** — shape "
+    "distance divided by **scheduled** time from departure at one stop to arrival at the next. That is what "
+    "the timetable **allows** along the published polyline, not how fast a bus “should” drive.\n\n"
+    "**What this is not:** a traffic or road model. GTFS has no **posted speed limits**, signals, junction "
+    "delays, or road class — so a **low average** (e.g. ~20 km/h) is **not** automatically wrong when the "
+    "street limit is 50–60 km/h; frequent stops and slow **averages** between timing points are normal.\n\n"
+    "**Operations:** the app does **not** know **skip-to-serve**, boarding time, or **AVL / GTFS-RT** — only "
+    "static schedule and shape."
 )
 
 gtfs_dir = data_dir(ROOT)
@@ -549,6 +581,7 @@ with st.sidebar:
                         "df": trip_scan_rows_to_dataframe(_problem),
                         "messages": _msgs,
                         "all_trip_ids": [str(x) for x in _id_list],
+                        "scan_rows": _rows,
                     }
 
 _render_feed_info(gtfs_dir)
@@ -600,17 +633,39 @@ if _rs is not None:
             )
 
             _all_ids = _rs.get("all_trip_ids") or []
+            _scan_rows = _rs.get("scan_rows")
+            if (
+                _scan_rows
+                and len(_scan_rows) > 0
+                and not hasattr(_scan_rows[0], "first_dep_raw")
+            ):
+                _scan_rows = None
             if _all_ids:
                 st.divider()
                 st.markdown("**Open one trip** — loads segments, map, and trip exports **only for that trip** (not all scanned trips).")
                 _rp = st.columns([4, 1, 1])
                 with _rp[0]:
-                    _trip_pick = st.selectbox(
-                        "Choose trip ID",
-                        options=sorted(_all_ids),
-                        key="route_scan_drill_pick",
-                        help="Pick a trip from this scan, then click **Load trip detail**.",
-                    )
+                    if _scan_rows and len(_scan_rows) == len(_all_ids):
+                        _sorted = sorted(_scan_rows, key=_route_scan_trip_sort_key)
+                        _pick_ids = [r.trip_id for r in _sorted]
+                        _label_map = {r.trip_id: _route_scan_trip_choice_label(r) for r in _sorted}
+                        _trip_pick = st.selectbox(
+                            "Choose trip (time · direction · headsign)",
+                            options=_pick_ids,
+                            format_func=lambda tid: _label_map.get(str(tid), str(tid)),
+                            key="route_scan_drill_pick",
+                            help=(
+                                "Sorted by **direction** then **first departure**. Trip ID is shown at the end. "
+                                "Then click **Load trip detail**."
+                            ),
+                        )
+                    else:
+                        _trip_pick = st.selectbox(
+                            "Choose trip ID",
+                            options=sorted(_all_ids),
+                            key="route_scan_drill_pick",
+                            help="Pick a trip from this scan, then click **Load trip detail**.",
+                        )
                 with _rp[1]:
                     _load_drill = st.button("Load trip detail", key="route_scan_drill_load", type="primary")
                 with _rp[2]:
@@ -809,9 +864,8 @@ df = pd.DataFrame(
 )
 
 st.caption(
-    "Each row is one segment to the next stop. Distance is along the mapped route; "
-    "speed is that distance divided by the timetable time for the segment. "
-    "**Flag(s)** highlights segments that may deserve a second look."
+    "Each row is one segment to the next stop. **Implied speed** is the **average** for that segment "
+    "(shape distance ÷ scheduled time). **Flag(s)** highlights segments that may deserve a second look."
 )
 
 _render_segment_audit_table(df)

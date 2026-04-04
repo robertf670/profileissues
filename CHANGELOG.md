@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.8.0] — 2026-04-06
+
+### Changed
+
+- **In-app positioning**: clearer explanation that implied speed is a **schedule vs shape** **average** per segment; not traffic, posted limits, skip-to-serve, or AVL; why low averages are common vs road limits
+- **Route scan → Open one trip**: trip picker shows **first departure · direction · headsign** (trip ID at the end), sorted by direction then departure time — no need to hunt raw trip IDs alone
+
+### Fixed
+
+- **Route scan trip picker**: avoid crash when **session state** still held older `TripScanRow` objects (before `first_dep_raw`); fall back to trip-ID list until the next **Scan route**
+
+---
+
 ## [1.7.0] — 2026-04-04
 
 ### Changed
@@ -133,7 +146,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/robertf670/profileissues/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/robertf670/profileissues/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/robertf670/profileissues/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/robertf670/profileissues/compare/v1.4.0...v1.5.0
