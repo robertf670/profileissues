@@ -17,7 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.8.0] — 2026-04-06
+## [1.9.0] — 07-04-2026
+
+### Added
+
+- **Audit form**: **Add leg** on the first leg, plus extra leg blocks each with its own **Remove leg**
+- **Multi-leg audit**: **Run audit** runs **Leg 1**, **Leg 2**, … in order with the same map, trip summary, flags, and segment table as the single-trip flow; **What flags mean** appears once below all legs when multiple
+- **Multi-leg exports**: per-leg **Excel** and **CSV** use the same filenames as the single-trip pattern (`{route}_{HHMM}_{DDMMYYYY}_{OUT|IN}_Audit.{xlsx|csv}`); **Download all legs (Excel, ZIP)** (after all legs) bundles successful legs’ `.xlsx` files under that naming inside `{route}_{DDMMYYYY}_Audit_legs.zip` (route and date from leg 1)
+
+### Changed
+
+- **Audit form**: terminus time field label **First departure from terminus** → **Departure time from terminus**
+- **Audit form**: extra legs show **Leg N** above **Remove leg** (left-aligned with **Add leg**)
+
+### Fixed
+
+- **Export filenames**: schedule-audit Excel/CSV/ZIP stems use **HHMM** (e.g. `0710`) for the time segment instead of stripping colons from `H:MM:SS` (which produced values like `71000` for 7:10)
+- **Audit form**: **Add leg** / **Remove leg** now update extra-leg blocks on the same action (Streamlit forms render before post-submit handlers; an immediate rerun refreshes the form)
+
+---
+
+## [1.8.0] — 06-04-2026
 
 ### Changed
 
@@ -30,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.7.0] — 2026-04-04
+## [1.7.0] — 04-04-2026
 
 ### Changed
 
@@ -38,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.6.0] — 2026-04-05
+## [1.6.0] — 05-04-2026
 
 ### Added
 
@@ -58,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.5.0] — 2026-03-31
+## [1.5.0] — 31-03-2026
 
 ### Added
 
@@ -70,7 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.4.0] — 2026-04-04
+## [1.4.0] — 04-04-2026
 
 ### Added
 
@@ -83,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.3.0] — 2026-04-03
+## [1.3.0] — 03-04-2026
 
 ### Changed
 
@@ -93,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.0] — 2026-04-02
+## [1.2.0] — 02-04-2026
 
 ### Added
 
@@ -108,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.1.0] — 2026-04-01
+## [1.1.0] — 01-04-2026
 
 ### Added
 
@@ -124,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] — 2026-03-31
+## [1.0.0] — 31-03-2026
 
 First public release of the Dublin Bus schedule auditor.
 
@@ -146,7 +166,8 @@ First public release of the Dublin Bus schedule auditor.
 
 - **No** automatic GTFS refresh on a schedule; manual **Download / refresh** in the UI.
 
-[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/robertf670/profileissues/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/robertf670/profileissues/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/robertf670/profileissues/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/robertf670/profileissues/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/robertf670/profileissues/compare/v1.5.0...v1.6.0

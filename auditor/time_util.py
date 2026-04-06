@@ -50,6 +50,24 @@ def parse_typed_departure_time(s: str) -> tuple[str | None, str | None]:
     return normalized, None
 
 
+def time_to_filename_hhmm(normalized: str) -> str:
+    """
+    Compact **HHMM** for export filenames (no colons, no seconds).
+    ``parse_typed_departure_time`` returns ``H:MM:SS``; naive ``.replace(':', '')``
+    would yield e.g. ``71000`` for 7:10 — this emits ``0710``.
+    """
+    t = str(normalized).strip()
+    parts = t.split(":")
+    if len(parts) >= 2:
+        try:
+            h = int(parts[0])
+            m = int(parts[1])
+            return f"{h:02d}{m:02d}"
+        except ValueError:
+            pass
+    return "".join(c for c in t if c.isalnum())
+
+
 def format_gtfs_time_display(t: str) -> str:
     """Pretty-print GTFS HH:MM:SS (drops :00 seconds; keeps times past midnight as-is)."""
     t = str(t).strip()

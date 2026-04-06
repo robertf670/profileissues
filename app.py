@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import csv
 import os
+import uuid
+import zipfile
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -38,6 +40,7 @@ from auditor.time_util import (
     format_gtfs_time_display,
     format_service_date_eu,
     parse_typed_departure_time,
+    time_to_filename_hhmm,
     time_to_seconds,
 )
 from auditor.trip_match import (
@@ -53,6 +56,50 @@ from auditor.url_state import hydrate_from_url_once, init_audit_widget_defaults,
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent
+
+_MAX_AUDIT_EXTRA_LEGS = 50
+
+
+def _audit_clear_extra_leg_session_keys(leg_id: str) -> None:
+    """Drop widget session keys for one extra leg slot (after Remove leg)."""
+    for _s in ("service_date", "route", "direction", "departure_time"):
+        st.session_state.pop(f"audit_extra_{leg_id}_{_s}", None)
+
+
+def _as_service_date(val: object, fallback: date) -> date:
+    """Normalize date_input / session values to ``date``."""
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    return fallback
+
+
+def _collect_audit_legs(
+    primary_service_date: date,
+    primary_route: str,
+    primary_direction: tuple[object, ...],
+    primary_dep_raw: str,
+    extra_leg_ids: list[str],
+) -> list[tuple[int, date, str, int, str]]:
+    """Build (1-based leg index, service date, route, direction_id, departure raw) for primary + extras."""
+    legs: list[tuple[int, date, str, int, str]] = []
+    d0 = int(primary_direction[1])
+    legs.append(
+        (1, primary_service_date, str(primary_route).strip(), d0, str(primary_dep_raw))
+    )
+    for i, leg_id in enumerate(extra_leg_ids):
+        sd = st.session_state.get(f"audit_extra_{leg_id}_service_date")
+        r = st.session_state.get(f"audit_extra_{leg_id}_route", "")
+        dir_t = st.session_state.get(f"audit_extra_{leg_id}_direction")
+        dep = st.session_state.get(f"audit_extra_{leg_id}_departure_time", "")
+        if dir_t is None:
+            dir_t = ("Outbound (GTFS 0)", 0)
+        d_id = int(dir_t[1]) if isinstance(dir_t, tuple) else int(dir_t)
+        sd_eff = _as_service_date(sd, primary_service_date)
+        legs.append((2 + i, sd_eff, str(r).strip(), d_id, str(dep)))
+    return legs
+
 
 # Streamlit's HTML table ignores pandas Styler alignment; CSS centers cells.
 # Use a display-only frame with formatted strings so floats don't show as 392.500000.
@@ -100,6 +147,20 @@ _AUDIT_TABLE_CSS = """
     min-width: 10rem;
 }
 </style>
+"""
+
+_AUDIT_FLAGS_EXPANDER_MD = """
+Flags are **hints**, not proof of an error. They compare timetable time to **distance along the GTFS shape**.
+
+| Flag | Meaning |
+|------|---------|
+| **No schedule time** | Arrival at B is not after departure at A in the feed (or zero seconds). Speed is not computed. |
+| **Tiny shape distance** | The two stops project to the same place on the polyline (under about **1 m**). Check duplicate stops or shape alignment. |
+| **Tight schedule** | Implied **average** speed is **≥ 55 km/h** — timetable is tight vs the mapped distance. |
+| **Slow implied speed on long segment** | Shape distance **≥ about 1 km** but implied average **under ~38 km/h**. Flags **through** legs where the timetable allows a very low average over distance — **not** a speed-limit check (GTFS has no road class). Short segments are excluded so small congested hops are not flagged. |
+| **Slower than typical for this trip** | When the trip has enough segments: this leg is **well below** the trip **median** implied speed (and the trip is not already uniformly slow). |
+
+Thresholds are in `auditor/segment_flags.py` (`LONG_SEGMENT_*`, trip-relative constants).
 """
 
 
@@ -242,6 +303,17 @@ def _filename_in_out_from_direction_id(direction_id: int) -> str:
     if direction_id == 1:
         return "IN"
     return f"D{direction_id}"
+
+
+def _audit_schedule_export_base_name(
+    route: str, hhmm: str, leg_sd: date, direction_id: int
+) -> str:
+    """Same stem as single-trip Excel/CSV: ``{route}_{HHMM}_{DDMMYYYY}_{OUT|IN}_Audit``."""
+    _hhmm_fn = time_to_filename_hhmm(hhmm)
+    return (
+        f"{route.strip()}_{_hhmm_fn}_{_filename_ddmmyyyy(leg_sd)}_"
+        f"{_filename_in_out_from_direction_id(int(direction_id))}_Audit"
+    )
 
 
 def _filename_in_out_from_route_scan_dirs(dirs: tuple) -> str:
@@ -694,6 +766,16 @@ if _rs is not None:
 init_audit_widget_defaults()
 hydrate_from_url_once()
 
+if "audit_extra_leg_ids" not in st.session_state:
+    st.session_state.audit_extra_leg_ids = []
+if "audit_extra_leg_count" in st.session_state:
+    _legacy_n = int(st.session_state.pop("audit_extra_leg_count") or 0)
+    if _legacy_n > 0 and not st.session_state.audit_extra_leg_ids:
+        for _ in range(min(_legacy_n, _MAX_AUDIT_EXTRA_LEGS)):
+            st.session_state.audit_extra_leg_ids.append(uuid.uuid4().hex[:12])
+
+_audit_extra_leg_ids: list[str] = list(st.session_state.get("audit_extra_leg_ids") or [])
+
 with st.form("audit"):
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -725,7 +807,7 @@ with st.form("audit"):
         direction_id = direction[1]
 
     departure_time = st.text_input(
-        "First departure from terminus",
+        "Departure time from terminus",
         placeholder="e.g. 17:32 or 17:32:00",
         help=(
             "Type the scheduled time at the first stop of the trip (stop_sequence minimum). "
@@ -734,169 +816,301 @@ with st.form("audit"):
         key="audit_departure_time",
     )
 
+    add_leg = st.form_submit_button("Add leg")
+
+    _remove_leg_clicked: dict[str, bool] = {}
+    for _leg_idx, _leg_id in enumerate(_audit_extra_leg_ids):
+        st.divider()
+        st.caption(f"Leg {_leg_idx + 2}")
+        _remove_leg_clicked[_leg_id] = st.form_submit_button(
+            "Remove leg",
+            key=f"audit_rm_{_leg_id}",
+        )
+
+        _ec1, _ec2, _ec3 = st.columns(3)
+        with _ec1:
+            st.date_input(
+                "Service date",
+                format="DD/MM/YYYY",
+                help="Day / month / year (EU).",
+                key=f"audit_extra_{_leg_id}_service_date",
+            )
+        with _ec2:
+            st.text_input(
+                "Route number",
+                placeholder="e.g. 39",
+                help="Matches routes.route_short_name (no default — enter your route).",
+                key=f"audit_extra_{_leg_id}_route",
+            )
+        with _ec3:
+            st.selectbox(
+                "Direction",
+                options=[("Outbound (GTFS 0)", 0), ("Inbound (GTFS 1)", 1)],
+                format_func=lambda x: x[0],
+                help=(
+                    "GTFS only has direction_id 0 and 1; names are not universal. "
+                    "In the current Dublin Bus feed, route 39 uses 0 for Ongar and 1 for Burlington Road–side patterns. "
+                    "If you get no trip or the wrong branch, switch direction."
+                ),
+                key=f"audit_extra_{_leg_id}_direction",
+            )
+
+        st.text_input(
+            "Departure time from terminus",
+            placeholder="e.g. 17:32 or 17:32:00",
+            help=(
+                "Type the scheduled time at the first stop of the trip (stop_sequence minimum). "
+                "Use HH:MM or HH:MM:SS. GTFS can use times after midnight (e.g. 25:30:00)."
+            ),
+            key=f"audit_extra_{_leg_id}_departure_time",
+        )
+
     submitted = st.form_submit_button("Run audit")
 
 # st_folium triggers reruns where the form is not "submitted"; keep showing the last good audit.
+_removed_leg_id: str | None = None
+for _lid, _did_click in _remove_leg_clicked.items():
+    if _did_click:
+        _removed_leg_id = _lid
+        break
+
+if add_leg and len(st.session_state.audit_extra_leg_ids) < _MAX_AUDIT_EXTRA_LEGS:
+    st.session_state.audit_extra_leg_ids.append(uuid.uuid4().hex[:12])
+if _removed_leg_id is not None:
+    st.session_state.audit_extra_leg_ids = [
+        x for x in st.session_state.audit_extra_leg_ids if x != _removed_leg_id
+    ]
+    _audit_clear_extra_leg_session_keys(_removed_leg_id)
+
 if submitted:
     st.session_state["_audit_keep"] = False
+if add_leg or _removed_leg_id is not None:
+    # Form body runs before these handlers; without an immediate rerun, extra leg
+    # widgets would not appear until some other interaction (one-click lag / wrong
+    # button behaviour with multiple form submit buttons).
+    st.session_state["_audit_keep"] = False
+    st.rerun()
 
 can_run = submitted or st.session_state.get("_audit_keep") or st.session_state.get("_audit_restore")
 if not can_run:
     st.stop()
+
+_audit_legs = _collect_audit_legs(
+    service_date, route, direction, departure_time, _audit_extra_leg_ids
+)
 
 if not str(route).strip():
     st.session_state.pop("_audit_restore", None)
     st.warning("Enter a **route number** before running the audit.")
     st.stop()
 
-dep_normalized, dep_parse_err = parse_typed_departure_time(departure_time)
-if dep_parse_err:
-    st.session_state.pop("_audit_restore", None)
-    st.warning(dep_parse_err)
-    st.stop()
-
-hhmm = dep_normalized
-
-with st.spinner("Matching trip and building segments…"):
-    trip_id, msgs, cand = match_trip(
-        gtfs_dir,
-        service_date=service_date,
-        route_short_name=route,
-        direction_id=direction_id,
-        headsign_contains="",
-        terminus_departure_hhmm=hhmm,
-    )
-
-for m in msgs:
-    st.caption(m)
-
-if trip_id is None:
-    st.session_state.pop("_audit_restore", None)
-    st.error("Could not resolve a single trip. Adjust inputs or check messages above.")
-    st.stop()
-
+_url_synced = False
+_any_leg_ok = False
+_audit_zip_xlsx: list[tuple[str, bytes]] = []
 _, trips, _, _ = load_core_tables(gtfs_dir)
-st_times = stop_times_for_trip(gtfs_dir, trip_id)
-shape_df = shape_for_trip(gtfs_dir, trips, trip_id)
-stops = load_stops(gtfs_dir)
 
-rows, err = build_segment_table(st_times, stops, shape_df)
-if err:
-    st.session_state.pop("_audit_restore", None)
-    st.error(err)
-    st.stop()
+for _leg_ix, (_leg_num, _leg_sd, _leg_route, _leg_dir_id, _leg_dep_raw) in enumerate(_audit_legs):
+    if len(_audit_legs) > 1:
+        if _leg_ix > 0:
+            st.divider()
+        st.subheader(f"Leg {_leg_num}")
 
-annotate_segment_flags(rows)
+    _hhmm, _dep_err = parse_typed_departure_time(_leg_dep_raw)
+    if _dep_err:
+        if _leg_num == 1:
+            st.session_state.pop("_audit_restore", None)
+            st.warning(_dep_err)
+            st.stop()
+        st.error(f"**Leg {_leg_num}:** {_dep_err}")
+        continue
+    if not _leg_route.strip():
+        if _leg_num == 1:
+            st.session_state.pop("_audit_restore", None)
+            st.warning("Enter a **route number** before running the audit.")
+            st.stop()
+        st.error(f"**Leg {_leg_num}:** Enter a **route number**.")
+        continue
 
-st.session_state["_audit_keep"] = True
-if st.session_state.get("_audit_restore"):
-    st.session_state.pop("_audit_restore", None)
-sync_audit_to_url(route, service_date, direction_id, dep_normalized)
-
-st.success(f"Trip **{trip_id}**")
-
-folium_map = build_route_map(shape_df, st_times, stops)
-if folium_map is not None:
-    st.subheader("Route map")
-    st.caption(
-        "Blue line: GTFS **shape** (published path). Red dots: **stops** on this trip (hover for name). "
-        "Map data © OpenStreetMap contributors."
+    _spinner_label = (
+        f"Leg {_leg_num}: matching trip and building segments…"
+        if len(_audit_legs) > 1
+        else "Matching trip and building segments…"
     )
-    st_folium(
-        folium_map,
-        use_container_width=True,
-        height=480,
-        returned_objects=[],
-        key="audit_route_map",
-    )
+    with st.spinner(_spinner_label):
+        trip_id, msgs, _cand = match_trip(
+            gtfs_dir,
+            service_date=_leg_sd,
+            route_short_name=_leg_route,
+            direction_id=_leg_dir_id,
+            headsign_contains="",
+            terminus_departure_hhmm=_hhmm,
+        )
 
-direction_label = "Outbound" if int(direction_id) == 0 else "Inbound"
-terminus_dep_display = format_gtfs_time_display(dep_normalized)
-trip_meta: TripMeta = {
-    "route": route.strip(),
-    "direction": direction_label,
-    "terminus_departure": terminus_dep_display,
-    "service_date_display": format_service_date_eu(service_date),
-    "day_type": day_type_label(service_date),
-}
+    for m in msgs:
+        st.caption(m)
 
-st.markdown(
-    f"**Trip** · Route **{trip_meta['route']}** · **{trip_meta['direction']}** · "
-    f"Terminus departure **{trip_meta['terminus_departure']}**"
-)
+    if trip_id is None:
+        st.session_state.pop("_audit_restore", None)
+        _trip_err = "Could not resolve a single trip. Adjust inputs or check messages above."
+        if _leg_num == 1:
+            st.error(_trip_err)
+            st.stop()
+        st.error(f"**Leg {_leg_num}:** {_trip_err}")
+        continue
 
-n_flagged, flag_buckets = flag_summary(rows)
-if n_flagged:
-    parts = [f"{k}: {v}" for k, v in sorted(flag_buckets.items(), key=lambda x: (-x[1], x[0]))]
-    st.warning("**" + str(n_flagged) + "** segment(s) flagged — " + " · ".join(parts))
-else:
-    st.caption("No heuristic flags on this trip (defaults in `auditor/segment_flags.py`).")
+    st_times = stop_times_for_trip(gtfs_dir, trip_id)
+    shape_df = shape_for_trip(gtfs_dir, trips, trip_id)
+    stops = load_stops(gtfs_dir)
 
-with st.expander("What flags mean (heuristics)"):
-    st.markdown(
-        """
-        Flags are **hints**, not proof of an error. They compare timetable time to **distance along the GTFS shape**.
+    rows, err = build_segment_table(st_times, stops, shape_df)
+    if err:
+        st.session_state.pop("_audit_restore", None)
+        if _leg_num == 1:
+            st.error(err)
+            st.stop()
+        st.error(f"**Leg {_leg_num}:** {err}")
+        continue
 
-        | Flag | Meaning |
-        |------|---------|
-        | **No schedule time** | Arrival at B is not after departure at A in the feed (or zero seconds). Speed is not computed. |
-        | **Tiny shape distance** | The two stops project to the same place on the polyline (under about **1 m**). Check duplicate stops or shape alignment. |
-        | **Tight schedule** | Implied **average** speed is **≥ 55 km/h** — timetable is tight vs the mapped distance. |
-        | **Slow implied speed on long segment** | Shape distance **≥ about 1 km** but implied average **under ~38 km/h**. Flags **through** legs where the timetable allows a very low average over distance — **not** a speed-limit check (GTFS has no road class). Short segments are excluded so small congested hops are not flagged. |
-        | **Slower than typical for this trip** | When the trip has enough segments: this leg is **well below** the trip **median** implied speed (and the trip is not already uniformly slow). |
+    annotate_segment_flags(rows)
 
-        Thresholds are in `auditor/segment_flags.py` (`LONG_SEGMENT_*`, trip-relative constants).
-        """
-    )
+    if not _url_synced:
+        if st.session_state.get("_audit_restore"):
+            st.session_state.pop("_audit_restore", None)
+        sync_audit_to_url(_leg_route, _leg_sd, _leg_dir_id, _hhmm)
+        _url_synced = True
 
-df = pd.DataFrame(
-    {
-        "From stop": [r.from_stop_name for r in rows],
-        "To stop": [r.to_stop_name for r in rows],
-        "Timetable depart (from)": [format_gtfs_time_display(r.depart_from_scheduled) for r in rows],
-        "Timetable arrive (to)": [format_gtfs_time_display(r.arrive_to_scheduled) for r in rows],
-        "Distance along shape (m)": [round(r.distance_m, 1) for r in rows],
-        "Scheduled time (s)": [r.time_s for r in rows],
-        "Scheduled time (M:SS)": [format_duration_m_ss(r.time_s) for r in rows],
-        "Implied speed (km/h)": [round(r.speed_kmh, 2) if r.speed_kmh is not None else None for r in rows],
-        "Flag(s)": ["; ".join(r.flags) if r.flags else "—" for r in rows],
+    _any_leg_ok = True
+
+    st.success(f"Trip **{trip_id}**")
+
+    folium_map = build_route_map(shape_df, st_times, stops)
+    if folium_map is not None:
+        st.subheader("Route map")
+        st.caption(
+            "Blue line: GTFS **shape** (published path). Red dots: **stops** on this trip (hover for name). "
+            "Map data © OpenStreetMap contributors."
+        )
+        st_folium(
+            folium_map,
+            use_container_width=True,
+            height=480,
+            returned_objects=[],
+            key=f"audit_route_map_leg_{_leg_num}",
+        )
+
+    direction_label = "Outbound" if int(_leg_dir_id) == 0 else "Inbound"
+    terminus_dep_display = format_gtfs_time_display(_hhmm)
+    trip_meta: TripMeta = {
+        "route": _leg_route.strip(),
+        "direction": direction_label,
+        "terminus_departure": terminus_dep_display,
+        "service_date_display": format_service_date_eu(_leg_sd),
+        "day_type": day_type_label(_leg_sd),
     }
-)
 
-st.caption(
-    "Each row is one segment to the next stop. **Implied speed** is the **average** for that segment "
-    "(shape distance ÷ scheduled time). **Flag(s)** highlights segments that may deserve a second look."
-)
+    st.markdown(
+        f"**Trip** · Route **{trip_meta['route']}** · **{trip_meta['direction']}** · "
+        f"Terminus departure **{trip_meta['terminus_departure']}**"
+    )
 
-_render_segment_audit_table(df)
+    n_flagged, flag_buckets = flag_summary(rows)
+    if n_flagged:
+        parts = [f"{k}: {v}" for k, v in sorted(flag_buckets.items(), key=lambda x: (-x[1], x[0]))]
+        st.warning("**" + str(n_flagged) + "** segment(s) flagged — " + " · ".join(parts))
+    else:
+        st.caption("No heuristic flags on this trip (defaults in `auditor/segment_flags.py`).")
 
-base_name = (
-    f"{route.strip()}_{hhmm.replace(':', '')}_{_filename_ddmmyyyy(service_date)}_"
-    f"{_filename_in_out_from_direction_id(int(direction_id))}_Audit"
-)
+    if len(_audit_legs) == 1:
+        with st.expander("What flags mean (heuristics)"):
+            st.markdown(_AUDIT_FLAGS_EXPANDER_MD)
 
-csv_buf = StringIO()
-cw = csv.writer(csv_buf)
-cw.writerow(["Route number", trip_meta["route"]])
-cw.writerow(["Direction", trip_meta["direction"]])
-cw.writerow(["Terminus departure (scheduled)", trip_meta["terminus_departure"]])
-cw.writerow(["Service date", trip_meta["service_date_display"]])
-cw.writerow(["Day type", trip_meta["day_type"]])
-cw.writerow([])
-df.to_csv(csv_buf, index=False)
+    df = pd.DataFrame(
+        {
+            "From stop": [r.from_stop_name for r in rows],
+            "To stop": [r.to_stop_name for r in rows],
+            "Timetable depart (from)": [format_gtfs_time_display(r.depart_from_scheduled) for r in rows],
+            "Timetable arrive (to)": [format_gtfs_time_display(r.arrive_to_scheduled) for r in rows],
+            "Distance along shape (m)": [round(r.distance_m, 1) for r in rows],
+            "Scheduled time (s)": [r.time_s for r in rows],
+            "Scheduled time (M:SS)": [format_duration_m_ss(r.time_s) for r in rows],
+            "Implied speed (km/h)": [round(r.speed_kmh, 2) if r.speed_kmh is not None else None for r in rows],
+            "Flag(s)": ["; ".join(r.flags) if r.flags else "—" for r in rows],
+        }
+    )
 
-xlsx_bytes = build_audit_excel_bytes(df, trip_meta)
+    st.caption(
+        "Each row is one segment to the next stop. **Implied speed** is the **average** for that segment "
+        "(shape distance ÷ scheduled time). **Flag(s)** highlights segments that may deserve a second look."
+    )
 
-_export_download_row()
-st.download_button(
-    "Download Excel (.xlsx)",
-    data=xlsx_bytes,
-    file_name=f"{base_name}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
-st.download_button(
-    "Download CSV",
-    data=csv_buf.getvalue(),
-    file_name=f"{base_name}.csv",
-    mime="text/csv",
-)
+    _render_segment_audit_table(df)
+
+    _base_name = _audit_schedule_export_base_name(_leg_route, _hhmm, _leg_sd, _leg_dir_id)
+
+    csv_buf = StringIO()
+    cw = csv.writer(csv_buf)
+    cw.writerow(["Route number", trip_meta["route"]])
+    cw.writerow(["Direction", trip_meta["direction"]])
+    cw.writerow(["Terminus departure (scheduled)", trip_meta["terminus_departure"]])
+    cw.writerow(["Service date", trip_meta["service_date_display"]])
+    cw.writerow(["Day type", trip_meta["day_type"]])
+    cw.writerow([])
+    df.to_csv(csv_buf, index=False)
+
+    xlsx_bytes = build_audit_excel_bytes(df, trip_meta)
+
+    if len(_audit_legs) > 1:
+        _audit_zip_xlsx.append((f"{_base_name}.xlsx", xlsx_bytes))
+        _export_download_row()
+        st.download_button(
+            "Download Excel (.xlsx)",
+            data=xlsx_bytes,
+            file_name=f"{_base_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"audit_xlsx_leg_{_leg_num}",
+        )
+        st.download_button(
+            "Download CSV",
+            data=csv_buf.getvalue(),
+            file_name=f"{_base_name}.csv",
+            mime="text/csv",
+            key=f"audit_csv_leg_{_leg_num}",
+        )
+    else:
+        _export_download_row()
+        st.download_button(
+            "Download Excel (.xlsx)",
+            data=xlsx_bytes,
+            file_name=f"{_base_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="audit_xlsx_single",
+        )
+        st.download_button(
+            "Download CSV",
+            data=csv_buf.getvalue(),
+            file_name=f"{_base_name}.csv",
+            mime="text/csv",
+            key="audit_csv_single",
+        )
+
+if len(_audit_legs) > 1:
+    with st.expander("What flags mean (heuristics)"):
+        st.markdown(_AUDIT_FLAGS_EXPANDER_MD)
+    if _audit_zip_xlsx:
+        _export_download_row()
+        _zip_buf = BytesIO()
+        with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
+            for _zip_fn, _zip_data in _audit_zip_xlsx:
+                _zf.writestr(_zip_fn, _zip_data)
+        _zip_file_name = (
+            f"{_audit_legs[0][2].strip()}_{_filename_ddmmyyyy(_audit_legs[0][1])}_Audit_legs.zip"
+        )
+        st.download_button(
+            "Download all legs (Excel, ZIP)",
+            data=_zip_buf.getvalue(),
+            file_name=_zip_file_name,
+            mime="application/zip",
+            key="audit_zip_all_legs_xlsx",
+        )
+
+st.session_state["_audit_keep"] = bool(_any_leg_ok)

@@ -7,6 +7,13 @@ alwaysApply: true
 
 This project uses **[Keep a Changelog](https://keepachangelog.com/)** style in **`CHANGELOG.md`**.
 
+## Unreleased vs a versioned release
+
+- **`## [Unreleased]`** is a **draft** bucket: new bullets go here **while** work is in progress on the branch.
+- **`## [x.y.z] — date`** is what **users and git tags** refer to. Nothing that ships in a release should stay only under **`[Unreleased]`** once that release is cut.
+
+If the user asks to **release**, **ship**, **cut a version**, or **publish a version**, treat the changelog as **incomplete** until the **Cutting a release** steps below are done for that version. Do **not** leave shipped features documented only under **`[Unreleased]`**.
+
 ## When to edit
 
 - After **user-visible** changes (UI, exports, flags, GTFS behaviour, env vars, docs that ship with the app): add bullets under **`## [Unreleased]`** in the right subsection (**Added** / **Changed** / **Fixed** / **Removed**).
@@ -17,13 +24,23 @@ This project uses **[Keep a Changelog](https://keepachangelog.com/)** style in *
 - **Past tense**, one idea per bullet, link issues/PRs only if the repo already uses them.
 - Do **not** duplicate the entire app description; summarize the delta.
 
-## Cutting a release
+## Release date format (Ireland)
 
-- Move content from **`[Unreleased]`** into a new **`## [x.y.z] — YYYY-MM-DD`** section (follow [SemVer](https://semver.org/) for `x.y.z`).
-- Reset **`[Unreleased]`** to empty subsection placeholders.
-- Update the **footer compare links** at the bottom of `CHANGELOG.md` so `[Unreleased]` points to `compare/vx.y.z...HEAD` and the new version has a sensible `compare` range (see existing links).
+- Use **`DD-MM-YYYY`** with **hyphens** in version headings, e.g. **`07-04-2026`** (day–month–year, same idea as common Irish written dates).
+- Example: **`## [1.9.0] — 07-04-2026`**
+
+## Cutting a release (required when shipping an update)
+
+Do **all** of these in **`CHANGELOG.md`** for the release to be complete:
+
+1. Move every bullet from **`[Unreleased]`** into a new **`## [x.y.z] — DD-MM-YYYY`** section (follow [SemVer](https://semver.org/) for `x.y.z`; pick the release date in **Irish `DD-MM-YYYY`** or ask if unsure).
+2. Reset **`[Unreleased]`** to empty subsection placeholders (**Added** / **Changed** / **Fixed** / **Removed**), not a duplicate of the release.
+3. Update the **footer compare links** at the bottom so **`[Unreleased]`** points to **`compare/vx.y.z...HEAD`** and add **`[x.y.z]`** with a sensible `compare` range (see existing links).
+
+Remind the user to create a matching **git tag** **`vx.y.z`** when they publish (or note it in the release PR), unless they say not to.
 
 ## Anti-patterns
 
 - Leaving **`[Unreleased]`** empty while shipping features in the same branch for a long time.
+- **Shipping a release** while user-visible bullets still sit only under **`[Unreleased]`** (forgot to move them into **`[x.y.z]`**).
 - Version bumps in `CHANGELOG.md` without a matching **git tag** `vx.y.z` when you actually release.
