@@ -23,6 +23,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for version history and how we track change
 
 - [Actual stop times via GTFS-RT](docs/gtfs-rt-actual-stop-times-plan.md) — archive live TripUpdates/VehiclePositions to show real arrival, departure, and dwell after a trip finishes
 - [Top problem journeys](docs/top-problem-journeys-plan.md) — ranked “most unrealistic” trips for a service day across all or filtered routes
+- [Historic GTFS / profile diffs](docs/gtfs-feed-history-plan.md) — keep feed snapshots across publishes and compare profiles to prove timetable/shape changes
 
 ### Route scan
 
