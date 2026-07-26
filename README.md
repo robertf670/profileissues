@@ -19,7 +19,10 @@ A small **Streamlit** app for Dublin Bus drivers and anyone auditing **published
 
 See **[CHANGELOG.md](CHANGELOG.md)** for version history and how we track changes.
 
-**Planning:** [Actual stop times via GTFS-RT](docs/gtfs-rt-actual-stop-times-plan.md) — archive live TripUpdates/VehiclePositions to show real arrival, departure, and dwell after a trip finishes (not implemented yet).
+**Planning (not implemented yet):**
+
+- [Actual stop times via GTFS-RT](docs/gtfs-rt-actual-stop-times-plan.md) — archive live TripUpdates/VehiclePositions to show real arrival, departure, and dwell after a trip finishes
+- [Top problem journeys](docs/top-problem-journeys-plan.md) — ranked “most unrealistic” trips for a service day across all or filtered routes
 
 ### Route scan
 
