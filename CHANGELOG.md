@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Docs:** detailed plan for archived GTFS-RT actual stop arrival/departure times and dwell (`docs/gtfs-rt-actual-stop-times-plan.md`)
 - **Docs:** detailed plan for Top problem journeys (day / multi-route ranked scan) (`docs/top-problem-journeys-plan.md`)
+- **Docs:** detailed plan for historic GTFS snapshots and profile change diffs (`docs/gtfs-feed-history-plan.md`)
 
 ### Changed
 
