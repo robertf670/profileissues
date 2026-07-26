@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs:** detailed plan for archived GTFS-RT actual stop arrival/departure times and dwell (`docs/gtfs-rt-actual-stop-times-plan.md`)
+
 ### Changed
 
 ### Fixed

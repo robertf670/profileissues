@@ -19,6 +19,8 @@ A small **Streamlit** app for Dublin Bus drivers and anyone auditing **published
 
 See **[CHANGELOG.md](CHANGELOG.md)** for version history and how we track changes.
 
+**Planning:** [Actual stop times via GTFS-RT](docs/gtfs-rt-actual-stop-times-plan.md) — archive live TripUpdates/VehiclePositions to show real arrival, departure, and dwell after a trip finishes (not implemented yet).
+
 ### Route scan
 
 In the **sidebar**, **Route scan** runs the same segment/flag logic on **every trip** for a chosen **route**, **service date**, and **direction(s)** (default: outbound and inbound). Results open in **Route scan results** on the main page: trips with **any flagged segment** or a **build error**. Large routes are capped at **500** trips per run (can be slow on Streamlit Cloud for busy routes).
